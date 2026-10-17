@@ -202,7 +202,8 @@ class PickPlaceCycle:
             return await self.detect_at_overview(goal, select)
         except CycleError as e:
             text = str(e)
-            if not any(k in text for k in ('No cube in view', 'clipped', 'Cube top surface', 'Need exactly one full cube')):
+            if not any(k in text for k in ('No cube in view', 'clipped', 'Cube top surface', 'Need exactly one full cube',
+                                         'Surface tilt', 'No horizontal surface')):
                 raise
             self.event('cube_not_in_overview', reason=text[:120])
             if not allow_sweep:
