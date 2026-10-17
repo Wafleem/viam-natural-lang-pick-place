@@ -91,7 +91,8 @@ class PickPlaceService(Generic, EasyResource):
             # Fields the code-3 web app (code3-web) checks before allowing a send.
             'available_goals': s.goals, 'calibrated': bool(s.calibration),
             'goal_details': ([{'name': 'home', 'type': 'table'}] if s.home else [])+[{'name': 'ring', 'type': 'ring'}]+[
-                {'name': n, 'type': 'box', 'color': b.get('color')} for n, b in s.boxes.items()],
+                {'name': n, 'type': 'box', 'color': b.get('color')} for n, b in s.boxes.items()]+[
+                {'name': n, 'type': 'box', 'color': b.get('color'), 'entry': 'side'} for n, b in s.side_boxes.items()],
             'suction': {'mode': 'closed_loop', 'holding_feedback_used': True, 'press_depth_mm': s.press_depth_mm,
                         'suction_dwell_s': s.suction_dwell_s, 'seal_settle_s': s.seal_settle_s,
                         'pick_retries': s.pick_retries, 'release_dwell_s': s.release_dwell_s},
@@ -140,7 +141,8 @@ class PickPlaceService(Generic, EasyResource):
             'api_version': API_VERSION, 'implementation': IMPLEMENTATION,
             'pick': {'objects': ['cube'], 'select': list(CUBE_SELECTORS)+['{"index": n} (left to right)']},
             'place': {'goals': ([{'name': 'home', 'type': 'table'}] if s.home else [])+[{'name': 'ring', 'type': 'ring'}]+[
-                {'name': n, 'type': 'box', 'color': b.get('color'), 'label': b.get('label', n)} for n, b in s.boxes.items()]},
+                {'name': n, 'type': 'box', 'color': b.get('color'), 'label': b.get('label', n)} for n, b in s.boxes.items()]+[
+                {'name': n, 'type': 'box', 'color': b.get('color'), 'label': b.get('label', n), 'entry': 'side'} for n, b in s.side_boxes.items()]},
             'default_goal': s.default_goal,
             'commands': {
                 'pick_place': {'moves': True, 'example': {'action': 'pick_place', 'pick': {'object': 'cube', 'select': 'left'},

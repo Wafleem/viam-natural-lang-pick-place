@@ -54,6 +54,9 @@ class Settings:
     calibration: dict
     overview_joints_deg: list
     boxes: dict  # name -> accepted box reference; every box is also a collision obstacle
+    # Boxes entered from the side (open face toward the robot, e.g. a shelf on the wall): the cube
+    # is turned level and slid in horizontally. name -> spec (see _side_boxes).
+    side_boxes: dict = field(default_factory=dict)
     home: dict | None = None  # {"xy_mm": [x, y], "yaw_deg": a}: the cube's table spot, goal "home"
     ring_spot: dict | None = None  # {"xy_mm", "diameter_mm", "height_mm"}: fixed ring; else vision finds it
     default_goal: str = 'ring'
@@ -128,7 +131,7 @@ class Settings:
             raise ValueError('placement_correction_world_xy_mm needs two values with magnitude <= 25 mm')
         mount = attrs.get('camera_mount_reference')
         s = cls(
-            calibration=cal, overview_joints_deg=overview, boxes=boxes, home=home, ring_spot=ring_spot, default_goal=goal,
+            calibration=cal, overview_joints_deg=overview, boxes=boxes, side_boxes=_side_boxes(attrs.get('side_boxes'), boxes), home=home, ring_spot=ring_spot, default_goal=goal,
             cube_size_mm=_number(attrs, 'cube_size_mm', 200, 20, 400),
             table_z_mm=_number(attrs, 'table_z_mm', -23, -500, 500),
             press_depth_mm=_number(attrs, 'press_depth_mm', 10, 0, 20),
@@ -166,7 +169,7 @@ class Settings:
     @property
     def goals(self):
         """Every place the cube can go: the home table spot (if configured), the ring, each box."""
-        return (['home'] if self.home else [])+['ring']+list(self.boxes)
+        return (['home'] if self.home else [])+['ring']+list(self.boxes)+list(self.side_boxes)
 
     def resolve_place(self, place):
         """Web/NL place target -> goal name. Accepts "ring", a box name, or
@@ -183,7 +186,7 @@ class Settings:
             goal = 'home'
         else:
             colour = place.get('color')
-            matches = [n for n, b in self.boxes.items() if colour is None or b.get('color') == str(colour).lower()]
+            matches = [n for n, b in [*self.boxes.items(), *self.side_boxes.items()] if colour is None or b.get('color') == str(colour).lower()]
             if place.get('type') not in (None, 'box') or not matches:
                 raise ValueError('No configured place target matches '+str(place))
             goal = matches[0]
@@ -260,6 +263,33 @@ def _box(raw, label):
     if min(box['inner_dimensions_mm']) <= 0 or box['rim_z_mm'] <= box['floor_center_world_mm'][2]:
         raise ValueError(label+' needs a positive opening and a rim above its floor')
     return box
+
+
+def _side_boxes(value, boxes):
+    """`side_boxes: [{name, color, label, back_x_mm, floor_z_mm, center_y_mm, opening_y_mm: [lo, hi],
+    top_z_mm, front_x_mm, panels: [frame names], back_clearance_mm, release_above_floor_mm}]`, all in
+    the arm's world frame. The open face is toward -x (the robot)."""
+    result = {}
+    for i, raw in enumerate(value or []):
+        name = raw.get('name') if isinstance(raw, dict) else None
+        if not isinstance(name, str) or not name or name in ('ring', 'home') or name in boxes or name in result:
+            raise ValueError(f'side_boxes[{i}] needs a unique name')
+        b = {'name': name, 'color': str(raw.get('color', '')).lower() or None, 'label': raw.get('label', name),
+             'panels': [str(f) for f in raw.get('panels', [])]}
+        for key, lo, hi in (('back_x_mm', 200, 1200), ('floor_z_mm', -100, 1300), ('center_y_mm', -800, 800), ('top_z_mm', -100, 1500),
+                            ('front_x_mm', 100, 1200)):
+            b[key] = _number(raw, key, None, lo, hi) if key in raw else None
+            if b[key] is None:
+                raise ValueError(f'side_boxes.{name}.{key} is required')
+        y = raw.get('opening_y_mm')
+        if not (isinstance(y, list) and len(y) == 2 and y[0] < y[1]):
+            raise ValueError(f'side_boxes.{name}.opening_y_mm needs [low, high]')
+        b['opening_y_mm'] = [float(y[0]), float(y[1])]
+        b['back_clearance_mm'] = _number(raw, 'back_clearance_mm', 25, 0, 200)
+        b['release_above_floor_mm'] = _number(raw, 'release_above_floor_mm', 6, 0, 30)
+        b['entry_margin_mm'] = _number(raw, 'entry_margin_mm', 15, 0, 200)
+        result[name] = b
+    return result
 
 
 def _boxes(attrs):

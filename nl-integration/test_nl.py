@@ -67,3 +67,15 @@ def test_clean_text_is_not_rewritten_and_motion_words_are_not_guessed():
     assert 'heard_as' not in parse('put the cube in the box')
     with pytest.raises(ValueError):
         parse('rest')
+
+
+@pytest.mark.parametrize('text,place', [
+    ('put the cube in the pink box', {'goal': 'pink'}),
+    ('put the cube in the box on the wall', {'goal': 'pink'}),
+    ('put it on the shelf', {'goal': 'pink'}),
+    ('put the cube in the box on the table', {'goal': 'box'}),
+    ('put the cube in the orange box', {'color': 'orange'}),
+    ('put the cube on the table', {'type': 'home'}),
+])
+def test_two_boxes_by_colour_or_place(text, place):
+    assert parse(text)['command']['place'] == place

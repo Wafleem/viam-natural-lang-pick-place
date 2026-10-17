@@ -107,7 +107,9 @@
         203.2
       ],
       "world_yaw_deg": -1.21,
-      "rim_z_mm": 130.0
+      "rim_z_mm": 130.0,
+      "label": "box on the table",
+      "color": "orange"
     }
   ],
   "home": {
@@ -245,5 +247,32 @@
       100,
       0
     ]
+  ],
+  "side_boxes": [
+    {
+      "name": "pink",
+      "color": "pink",
+      "label": "box on the wall",
+      "back_x_mm": 768,
+      "floor_z_mm": 575,
+      "center_y_mm": 51,
+      "opening_y_mm": [
+        -82,
+        184
+      ],
+      "top_z_mm": 806,
+      "front_x_mm": 429,
+      "panels": [
+        "box-shell-floor",
+        "box-shell-top",
+        "box-shell-back",
+        "box-shell-left",
+        "box-shell-right",
+        "wall-front-2"
+      ],
+      "back_clearance_mm": 8,
+      "release_above_floor_mm": 6,
+      "entry_margin_mm": 5
+    }
   ]
 }

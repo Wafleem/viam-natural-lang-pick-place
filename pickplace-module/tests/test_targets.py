@@ -107,7 +107,7 @@ def test_multiple_named_boxes(attrs, observation, kin):
     second = {**box, 'name': 'box2', 'floor_center_world_mm': [box['floor_center_world_mm'][0]+150, 330.0, box['floor_center_world_mm'][2]],
               'placement_center_xy_mm': [box['floor_center_world_mm'][0]+150, 330.0], 'rim_z_mm': 160.0}
     s = Settings.from_attributes({**attrs, 'boxes': [{**box, 'name': 'box'}, second]})
-    assert s.goals == ['home', 'ring', 'box', 'box2']
+    assert s.goals == ['home', 'ring', 'box', 'box2', *s.side_boxes]
     t = compute_targets(s, observation, 'box2', kin, s.overview_joints_deg)
     assert t['goal_top_world_mm'][:2] == pytest.approx(second['placement_center_xy_mm'])
     assert t['above_place']['z']-s.cube_size_mm == pytest.approx(160+s.box_entry_clearance_mm)  # its own rim

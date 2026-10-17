@@ -12,7 +12,8 @@ import re
 # Offline stand-in for {"action":"describe"}; the live one comes from the robot.
 DESCRIBE = {
     'pick': {'objects': ['cube'], 'select': ['only', 'left', 'right', 'nearest', 'farthest']},
-    'place': {'goals': [{'name': 'ring', 'type': 'ring'}, {'name': 'box', 'type': 'box', 'color': 'orange'}]},
+    'place': {'goals': [{'name': 'ring', 'type': 'ring'}, {'name': 'box', 'type': 'box', 'color': 'orange', 'label': 'box on the table'},
+                        {'name': 'pink', 'type': 'box', 'color': 'pink', 'label': 'box on the wall', 'entry': 'side'}]},
 }
 
 SELECT_WORDS = {
@@ -39,9 +40,9 @@ SOUND_ALIKES = {
     'rink': 'ring', 'wring': 'ring', 'rings': 'ring', 'rang': 'ring', 'rung': 'ring',
     'books': 'box', 'bocks': 'box', 'bucks': 'box', 'fox': 'box', 'pox': 'box', 'boxes': 'box', 'bach': 'box',
     'hope': 'hoop', 'hoops': 'hoop', 'write': 'right', 'rite': 'right', 'wright': 'right',
-    'lift': 'left', 'orage': 'orange', 'oranges': 'orange',
+    'lift': 'left', 'orage': 'orange', 'oranges': 'orange', 'ping': 'pink', 'pinks': 'pink', 'wal': 'wall', 'walls': 'wall',
 }
-FUZZY_TARGETS = ['cube', 'block', 'ring', 'hoop', 'box', 'bin', 'basket', 'orange', 'blue', 'left', 'right',
+FUZZY_TARGETS = ['cube', 'block', 'ring', 'hoop', 'box', 'bin', 'basket', 'orange', 'pink', 'wall', 'shelf', 'blue', 'left', 'right',
                  'nearest', 'closest', 'farthest', 'furthest', 'leftmost', 'rightmost']
 KNOWN = set(FUZZY_TARGETS) | set(SELECT_WORDS) | set(ORDINALS) | set(RING_WORDS) | {
     'put', 'place', 'move', 'pick', 'up', 'drop', 'grab', 'take', 'set', 'bring', 'carry', 'the', 'a', 'an', 'it',
@@ -100,6 +101,16 @@ def _parse(text, describe):
     for g in goals:  # specific box names first ("box2", "blue_box"); plain "box" is not a name
         if g['type'] == 'box' and g['name'].lower() not in generic and g['name'].lower() in words:
             place = {'goal': g['name']}
+    # Boxes can be named by where they sit: "the box on the wall" / "the shelf" vs "the box on the table".
+    boxish = bool(set(words) & (generic | {'shelf', 'cubby'}))
+    if place is None and (boxish or 'shelf' in words or 'cubby' in words):
+        for where in ('wall', 'shelf', 'cubby', 'table'):
+            if where in words:
+                hit = next((g for g in goals if g['type'] == 'box' and where in str(g.get('label', '')).lower()
+                            or (where in ('shelf', 'cubby') and g.get('entry') == 'side')), None)
+                if hit:
+                    place = {'goal': hit['name']}
+                    break
     if place is None and any(w in words for w in ('table', 'home')):
         place = {'type': 'home'}
     if place is None and any(w in words for w in RING_WORDS):

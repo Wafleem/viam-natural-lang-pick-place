@@ -12,7 +12,7 @@ import numpy as np
 from .box import check_cube_fits, placement_xy
 from .calibration import cube_target, ring_target
 from .grasp_geometry import describe_grasp, place_tcp
-from .transforms import pose_matrix
+from .transforms import matrix_pose, pose_matrix
 from .vision_geometry import downward_pose
 
 
@@ -42,6 +42,10 @@ def _travel(a, b):
 def goal_surface(settings, observation, goal):
     """(cube top centre when seated at the goal, base yaw, box or None) for any place."""
     s, size = settings, settings.cube_size_mm
+    side = s.side_boxes.get(goal)
+    if side is not None:
+        c = side_cube_center(s, side)
+        return np.array([c[0]-size/2, c[1], c[2]]), 0.0, None
     box = s.boxes.get(goal)
     if box is not None:
         return np.array([*placement_xy(box), box['floor_center_world_mm'][2]+size]), box['world_yaw_deg'], box
@@ -51,6 +55,52 @@ def goal_surface(settings, observation, goal):
     if s.ring_spot:  # fixed ring: the cube centre goes exactly on the configured spot
         return np.array([*s.ring_spot['xy_mm'], s.calibration['place_tcp_z_mm']]), s.placement_world_yaw_deg, None
     return ring_target(observation, s.calibration)+np.array([*s.placement_correction_world_xy_mm, 0.]), s.placement_world_yaw_deg, None
+
+
+def side_cube_center(settings, side):
+    """Cube centre at release in a side box: back_clearance_mm short of the back wall, centred in y,
+    release_above_floor_mm over the floor."""
+    size = settings.cube_size_mm
+    return np.array([side['back_x_mm']-side['back_clearance_mm']-size/2, side['center_y_mm'],
+                     side['floor_z_mm']+side['release_above_floor_mm']+size/2])
+
+
+def side_releases(settings, side, grasp):
+    """[(label, release TCP, pre-insert TCP)]: the gripped face turned to face the robot (-x), in its
+    four 90 deg rolls. Pre-insert is straight back along -x until the whole cube is outside the opening."""
+    size = settings.cube_size_mm
+    c = side_cube_center(settings, side)
+    face = c-np.array([size/2, 0, 0])
+    back_off = c[0]-(side['front_x_mm']-side['entry_margin_mm']-size/2)  # centre must clear the front plane
+    G = np.asarray(grasp['tcp_in_cube'], float)
+    out = []
+    z = np.array([-1.0, 0, 0])  # cube-frame z (out of the gripped face) points at the robot
+    for k, x in enumerate(([0, 0, 1.0], [0, 1.0, 0], [0, 0, -1.0], [0, -1.0, 0])):
+        C = np.eye(4)
+        C[:3, 0], C[:3, 2] = x, z
+        C[:3, 1] = np.cross(z, x)
+        C[:3, 3] = face
+        release = matrix_pose((C @ G).tolist())
+        pre = {**release, 'x': float(release['x']-back_off)}
+        out.append((90*k, release, pre))
+    return out
+
+
+def side_slide_joints(kinematics, release, pre, margin, step_mm=10):
+    """Joints for a side-box release, and for the pre-insert reached by walking straight back along
+    -x on the SAME arm configuration (so the slide in is one continuous straight move). Solved from
+    the natural reach-in pose (arm straight out, wrist level). Raises ValueError if the line leaves
+    that configuration before the cube clears the opening."""
+    yaw = math.degrees(math.atan2(release['y'], release['x']))
+    q = kinematics.ik(release, [yaw, -15, -75, 313, 0, -133], margin)
+    q_release, x = q, release['x']
+    while x > pre['x']:
+        x = max(x-step_mm, pre['x'])
+        qn = kinematics.ik({**release, 'x': float(x)}, q, margin)
+        if max(abs(a-b) for a, b in zip(qn, q)) > 12:
+            raise ValueError(f'the straight slide changes arm configuration at TCP x {x:.0f}')
+        q = qn
+    return q_release, q
 
 
 def compute_targets(settings, observation, goal, kinematics, start_joints_deg, source=None):
@@ -115,7 +165,20 @@ def compute_targets(settings, observation, goal, kinematics, start_joints_deg, s
     if not picks:
         raise ValueError('No pickup orientation is reachable with the joint-limit margin')
     best = None
+    side = s.side_boxes.get(goal)
+    if side is not None:  # a level release needs the full IK search: only try the two cheapest picks
+        picks = sorted(picks, key=lambda p: p[0])[:2]
     for pick_cost, yaw, contact, above_p, q_p, grasp in picks:
+        if side is not None:  # horizontal entry: release and pre-insert from the side geometry
+            for place_yaw, release, above in side_releases(s, side, grasp):
+                try:
+                    _, q = side_slide_joints(kinematics, release, above, margin)
+                except ValueError:
+                    continue
+                cost = pick_cost+3*_travel(q, q_p)
+                if best is None or cost < best[0]:
+                    best = (cost, (yaw, contact, above_p, q_p, grasp), (place_yaw, release, above, q))
+            continue
         for k in range(4):
             place_yaw = place_base_yaw+90*k
             if box is not None:

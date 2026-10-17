@@ -39,10 +39,11 @@ def prism(label, xyz, dims, yaw=0.0):
                     box=RectangularPrism(dims_mm=Vector3(x=float(dims[0]), y=float(dims[1]), z=float(dims[2]))))
 
 
-def workcell_prisms(workcell, inflate=0.0):
+def workcell_prisms(workcell, inflate=0.0, exact=()):
     """[(frame, center_xyz, dims, yaw_deg)] -> obstacle geometries (labels scene-<frame>), grown by
-    `inflate` mm on every side so the planner itself keeps that clearance."""
-    return [prism('scene-'+name, xyz, [d+2*inflate for d in dims], yaw) for name, xyz, dims, yaw in workcell]
+    `inflate` mm on every side so the planner itself keeps that clearance. Frames in `exact` (the
+    panels of a side box the cube is entering) keep their true size."""
+    return [prism('scene-'+name, xyz, [d+(0 if name in exact else 2*inflate) for d in dims], yaw) for name, xyz, dims, yaw in workcell]
 
 
 def carried_cube_violations(kin, path, tcp_in_cube, size, workcell, clearance, steps=12):
@@ -84,8 +85,8 @@ def scene_world(settings, observation, targets, cube_state, goal, workcell=()):
     source = targets.get('source_place', 'table')
     # No padding while the cube is in, or passes through, a box opening (it is tight);
     # 10 mm around the cube otherwise.
-    in_box = {'at_pick': source in s.boxes, 'placed': goal in s.boxes,
-              'carried': source in s.boxes or goal in s.boxes}[cube_state]
+    in_box = {'at_pick': source in s.boxes, 'placed': goal in s.boxes or goal in s.side_boxes,
+              'carried': source in s.boxes or goal in s.boxes or goal in s.side_boxes}[cube_state]
     pad = 0.0 if in_box else 10.0
     obstacles = []
     # Tabletop patch around both ends; its top is the table (taught contact - cube size).
@@ -105,7 +106,8 @@ def scene_world(settings, observation, targets, cube_state, goal, workcell=()):
         obstacles.extend(ring_prisms(xy, top-h/2, d, h))
     obstacles.extend(box_obstacles(s))
     obstacles.extend(other_cubes(s, observation))
-    obstacles.extend(workcell_prisms(workcell, s.carry_clearance_mm))
+    side = s.side_boxes.get(goal)
+    obstacles.extend(workcell_prisms(workcell, s.carry_clearance_mm, side['panels'] if side else ()))
     if cube_state == 'carried':
         # Tool Z points down into the cube. The cup sits press_depth_mm inside the top
         # face, so the cube spans [-press, size] along tool Z (conservative both ways).
@@ -117,7 +119,10 @@ def scene_world(settings, observation, targets, cube_state, goal, workcell=()):
         observer = PoseInFrame(reference_frame=s.gripper, pose=Pose(o_z=1))
     else:
         top, yaw = (cube_top, targets['cube_yaw_deg']) if cube_state == 'at_pick' else (goal_top, targets['place_yaw_deg'])
-        cube = prism(CUBE, [top[0], top[1], top[2]-size/2], [size+pad, size+pad, size], yaw)
+        if cube_state == 'placed' and goal in s.side_boxes:  # lying in the side box: its gripped face looks at -x
+            cube = prism(CUBE, [top[0]+size/2, top[1], top[2]], [size+pad, size+pad, size+pad])
+        else:
+            cube = prism(CUBE, [top[0], top[1], top[2]-size/2], [size+pad, size+pad, size], yaw)
         observer = PoseInFrame(reference_frame='world', pose=Pose(o_z=1))
     return WorldState(obstacles=[GeometriesInFrame(reference_frame='world', geometries=obstacles)],
                       transforms=[Transform(reference_frame=CUBE, pose_in_observer_frame=observer, physical_object=cube)])
@@ -157,6 +162,8 @@ def supports(settings, place):
     """Frames the cube rests on at a place (allowed cube contacts there)."""
     if place in settings.boxes:
         return [floor_label(place)]
+    if place in settings.side_boxes:
+        return ['scene-'+f for f in settings.side_boxes[place]['panels'] if 'floor' in f]
     if place == 'ring':
         return [label for label, *_ in RING_BARS]
     return ['table', TABLE]  # home or anywhere on the table
@@ -249,16 +256,25 @@ class Planner:
         world = scene_world(s, observation, targets, cube_state, goal, self.workcell)
         what, value = destinations[name]
         try:
+            side = s.side_boxes.get(goal)
+            # Into a side box the cube is turned level on the way, so that carry has no upright rule;
+            # the straight slide in is checked against everything but the box it enters.
+            upright = s.carry_upright_deg if cube_state == 'carried' and kind == 'joint' and not side else None
+            checked = [w for w in self.workcell if not (side and name in ('place', 'retract') and w[0] in side['panels'])]
             for attempt in range(5):
                 path = await self.segment(start, world, goal_deg=value if what == 'joint' else None,
                                           pose=value if what == 'pose' else None, straight=kind == 'straight',
                                           allow=allowed_contacts(s, contacts, goal, targets.get('source_place', 'table')),
-                                          upright=s.carry_upright_deg if cube_state == 'carried' and kind == 'joint' else None)
+                                          upright=upright)
                 # The carried cube is part of the arm: its swept volume must clear the walls
                 # and ceiling with margin. The planner is sampling-based, so re-plan if not.
                 bad = carried_cube_violations(self.kin, path, targets['grasp']['tcp_in_cube'], s.cube_size_mm,
-                                              self.workcell, s.carry_clearance_mm/2) if cube_state == 'carried' else []
-                if cube_state == 'carried' and kind == 'joint':
+                                              [w for w in checked if not (side and w[0] in side['panels'])], s.carry_clearance_mm/2) if cube_state == 'carried' else []
+                if cube_state == 'carried' and side and name == 'transfer':
+                    # The carry ends with the cube just outside this box's opening: only real contact counts.
+                    bad += carried_cube_violations(self.kin, path, targets['grasp']['tcp_in_cube'], s.cube_size_mm,
+                                                   [w for w in self.workcell if w[0] in side['panels']], 3.0)
+                if cube_state == 'carried' and kind == 'joint' and upright is not None:
                     tilt = max_tool_tilt_deg(self.kin, path)
                     if tilt > s.carry_upright_deg+5:
                         bad = bad+[('tool tilt', -tilt)]
