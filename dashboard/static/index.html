@@ -152,7 +152,7 @@
     <div class="flows">
       <button class="flow safe" onclick="flow('check')">PRE-FLIGHT<small>self_test + live plan check · no motion</small></button>
       <button class="flow" onclick="flow('scan')">SCAN<small>camera only: overview + sweep to find the cube</small></button>
-      <button class="flow" onclick="flow('recover')">RECOVER &amp; HOME<small>clear error → recover limits → overview</small></button>
+      <button class="flow" onclick="flow('recover')">RECOVER &amp; HOME<small>clear error → set a held cube down → overview</small></button>
       <button class="flow" onclick="flow('box')">CUBE → BOX<small>sweep → pick → place → park at overview</small></button>
       <button class="flow" onclick="flow('ring')">CUBE → RING<small>sweep → pick → place → park at overview</small></button>
       <button class="flow" onclick="flow('home')">CUBE → HOME<small>reset_cube: from box, ring or anywhere on the table</small></button>
@@ -646,6 +646,7 @@ async function flow(name) {
       for (const goal of ['box', 'ring']) await step(`live plan check → ${goal} (saved overview frame)`, async () => { const r = await api('/api/plan_check', {goal, frame:0}); if (!r.ok) throw new Error(r.error); return r; });
     } else if (name === 'recover') {
       await step('clear controller error', () => api('/api/arm/do', {command:'clear_error'}));
+      await step('recover_cube (set a gripped cube back down, park)', go('recover_cube'));
       await step('recover_limits', go('recover_limits'));
       await step('reset → overview', go('reset'));
       await step('self_test', still('self_test'));

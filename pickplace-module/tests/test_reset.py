@@ -27,7 +27,7 @@ def mod90(a):
 
 
 def test_goals_are_home_ring_box(settings):
-    assert settings.goals == ['home', 'ring', 'box']
+    assert settings.goals == ['home', 'ring', 'box', 'pink']
     assert settings.resolve_place({'type': 'home'}) == 'home' and settings.resolve_place({'type': 'table'}) == 'home'
 
 
@@ -140,7 +140,10 @@ def test_failure_after_contact_forgets_location(settings, kin, urdf, tmp_path):
     arm.move_through_joint_positions = failing
     with pytest.raises(RuntimeError):
         asyncio.run(cycle.run('box'))
-    assert cycle.memory.location['place'] == 'unknown'
+    # Still gripped when the lift failed: code-2 set the cube back on its pick spot and parked.
+    names = [e['stage'] for e in cycle.events]
+    assert 'recovered_cube' in names and cycle.gripper.calls[-1] == 'open'
+    assert cycle.memory.location['place'] == 'table'
     # A failure before any contact (here: planning) keeps what we knew.
     cycle2, arm2, *_ = make_cycle(settings, kin, urdf, settings.overview_joints_deg)
     cycle2.memory = CubeMemory(tmp_path/'b')
