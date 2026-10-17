@@ -42,6 +42,8 @@ class PickPlaceCycle:
         self.lease_token = ''
         self.kin = None
         self.last_frame = None
+        self.base_settings = settings  # configured; self.s may carry this cycle's tracked boxes
+        self.scene_report = {}
 
     # ---- bookkeeping -------------------------------------------------------
     def event(self, stage, **detail):
@@ -188,21 +190,33 @@ class PickPlaceCycle:
     async def detect(self, goal, select='only'):
         """Five consecutive frames; four (incl. the newest two) must agree on the selected cube."""
         self.event('detecting', select=select)
-        frames, last = [], ''
+        frames, raws, last = [], [], ''
         for i in range(9):
             obs = await self.capture(require_ring=goal == 'ring', select=select)
             issues = [e for e in obs.get('issues', []) if not e.startswith('Depth/world tabletop differs')]
             if issues:
                 raise CycleError('; '.join(issues))
             frames.append(obs)
+            raws.append(self.last_frame)
             if len(frames) >= 5:
                 try:
                     self.observation = consensus_observation(frames[-5:])
+                    self.track_scene(raws[-5:], frames[-5:])
                     return self.observation
                 except ValueError as e:
                     last = str(e)
             await asyncio.sleep(.15)
         raise CycleError(last or 'Could not confirm stable detections')
+
+    def track_scene(self, raws, observations):
+        """dynamic-scene: move tracked boxes to where the camera sees them (this cycle only)."""
+        from .scene import track_boxes, tracked_names
+        self.s = self.base_settings
+        if not tracked_names(self.s):
+            self.scene_report = {}
+            return
+        self.s, self.scene_report = track_boxes(self.s, raws, observations)
+        self.event('boxes_tracked', **{n: r['updated'] for n, r in self.scene_report['boxes'].items()})
 
     # ---- motion ------------------------------------------------------------
     async def execute(self, name, path, speed):
@@ -278,6 +292,7 @@ class PickPlaceCycle:
             'pickup_tcp_world': self.targets['press'], 'release_tcp_world': self.targets['release'],
             'press_depth_mm': self.s.press_depth_mm, 'cube_yaw_deg': self.targets['cube_yaw_deg'],
             'place_yaw_deg': self.targets['place_yaw_deg'],
+            'scene': copy.deepcopy(self.scene_report),
         }
         return plans
 
