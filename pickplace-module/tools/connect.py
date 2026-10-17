@@ -46,7 +46,11 @@ async def connect():
         if not keys:
             raise RuntimeError('No existing machine API key; none was created')
         key = next((k.api_key for k in keys if 'default' in k.api_key.name.lower()), keys[0].api_key)
-        robot = await RobotClient.at_address(HOST, RobotClient.Options.with_api_key(api_key=key.key, api_key_id=key.id))
+        options = RobotClient.Options.with_api_key(api_key=key.key, api_key_id=key.id)
+        # Re-read the resource list every 10 s: a client opened while a module restarts would
+        # otherwise keep a stale list ("ResourceNotFoundError") for its whole lifetime.
+        options.refresh_interval = 10
+        robot = await RobotClient.at_address(HOST, options)
         yield robot
     finally:
         if robot is not None:
