@@ -16,7 +16,9 @@ It keeps the same registry module and model, so the existing `code-2` service co
 | Wrist / J4 | Planner picked J4 = 360.000° (the URDF bound); the controller faulted with *Joint Angle Exceeds Limit* | IK picks free-space joint goals near the current pose; **every planned node keeps 5° from every joint limit** (`joint_limit_margin_deg`). J4 now stays near 0° |
 | Cube yaw | Fixed pickup branch | The square cube allows 90° steps; the step with the least joint travel is chosen for pickup and placement |
 | Targets | Ring + box survey flows, legacy sweep commands | One flow for both goals: vision at the calibrated overview → plan every stage → execute |
-| Ring | Required for every goal | Required for `ring`; optional obstacle for `box` |
+| Ring | Required for every goal | Required for `ring`; optional obstacle for box goals |
+| Boxes | One hard-wired box | `boxes` list of named goals; `measure_box` drafts new entries from the camera |
+| Diagnostics | — | `self_test` checks kinematics, camera, lease and the reset path without moving |
 
 Unchanged: vision targeting (5-frame RGB-D consensus, overview calibration, 15 mm grasp offset toward
 the image top), the accepted box pose/aperture/floor, collision-checked planning in the Viam builtin
@@ -117,8 +119,7 @@ Then confirm in the app (CONTROL → code-2 → DoCommand) that status reports
 .venv/bin/python tools/select_version.py --version 0.0.24 --apply
 ```
 
-Version-only rollback works when the attributes were not replaced. The exact 0.0.23 config is
-also preserved in the old workspace (`armfarm19/restore_code2_23.py`).
+Version-only rollback works when the attributes were not replaced.
 
 ## 4. Operating
 
@@ -127,11 +128,13 @@ Viam app → armfarm19 → CONTROL → **code-2** → DoCommand. Commands that m
 
 | Command | Moves? | What it does |
 |---|---|---|
-| `{"action":"status"}` | no | state, stage, error, plan summary, last 30 events |
+| `{"action":"status"}` | no | state, stage, error, goals, plan summary, last 30 events |
+| `{"action":"self_test"}` | no | from any pose: kinematics vs frame system, camera, lease, reset plan. No gripper calls |
 | `{"action":"dry_run","goal":"box"}` | no | at the overview: detect + plan every stage, report clearances |
-| `{"action":"box_once","workcell_ready":true}` | **yes** | one cube → box cycle |
+| `{"action":"measure_box","name":"box2"}` | no | at the overview: measure an orange Post-it box → candidate `boxes` entry |
+| `{"action":"box_once","workcell_ready":true}` | **yes** | one cube → first configured box (add `"goal":"box2"` for another) |
 | `{"action":"ring_once","workcell_ready":true}` | **yes** | one cube → ring cycle |
-| `{"action":"run","goal":"box","workcell_ready":true}` | **yes** | same as above, explicit goal |
+| `{"action":"run","goal":"<ring or box name>","workcell_ready":true}` | **yes** | one cycle to any goal |
 | `{"action":"reset","workcell_ready":true}` | **yes** | suction off, straight retreat if low, go to the overview |
 | `{"action":"recover_limits","workcell_ready":true}` | **yes** | roll back a joint sitting at its hard limit |
 | `{"action":"release"}` | no | suction off |
@@ -148,8 +151,9 @@ Keep the physical e-stop in reach. The software `stop` is not an e-stop.
 
 ### Workcell rules
 
-- **Box**: must stay where it was accepted: floor centre (298.2, −143.1, 0.85) mm, yaw −4.93°,
-  opening 261.4 × 206.6 mm, rim z 130.0 mm. If someone moves it, re-measure and update `box` in config.
+- **Boxes**: each must stay where it was accepted. The current `box` has floor centre
+  (298.2, −143.1, 0.85) mm, yaw −4.93°, opening 261.4 × 206.6 mm and rim z 130.0 mm. If someone moves a
+  box, re-measure it and update its entry. Every configured box is a collision obstacle for every goal.
 - **Ring**: the cube resting on the ring must not reach the box or `wall-front` (x ≈ 600 mm).
   Verified on the live planner: ring at tool XY (440, 130) plans; (530, 67), where it sat at 23:02 on
   Oct 16, does not (cube would hit `wall-front`), and (440, 60–90) does not (box wall).
@@ -164,8 +168,31 @@ Keep the physical e-stop in reach. The software `stop` is not an e-stop.
 | `suction_dwell_s` / `release_dwell_s` | 1.0 | 0–10 |
 | `travel_speed_deg_s` / `approach_speed_deg_s` / `press_speed_deg_s` | 10 / 3 / 2 | 0.5–20 / 0.5–10 / 0.2–5 |
 | `joint_limit_margin_deg` | 5 | 1–30 |
-| `default_goal` | from config | `ring` / `box` |
+| `default_goal` | from config | `ring` or a box name |
 | `lease_service` | `code-1` | `""` disables the lease |
+
+### Adding another box
+
+Goals are `ring` plus one goal per entry in the `boxes` list. The older single `box` /
+`surveyed_box.box` attributes are still read as one box named `box`.
+
+```json
+"boxes": [
+  {"name": "box",  "floor_center_world_mm": [298.2, -143.1, 0.85], "placement_center_xy_mm": [298.4, -141.3],
+   "inner_dimensions_mm": [261.4, 206.6], "world_yaw_deg": -4.93, "rim_z_mm": 130.0},
+  {"name": "box2", "...": "from measure_box"}
+]
+```
+
+1. Put the new box where the overview camera sees all four walls and its inside floor, with two
+   orange Post-its on it. Run `reset`, then `{"action":"measure_box","name":"box2"}`.
+2. `status.last_result.candidate` is a ready-made entry: three frames that agree, the tightest
+   opening seen, and heights matched to the taught tabletop.
+3. Check the opening with a tape measure. Add the entry to `boxes`, then run
+   `{"action":"dry_run","goal":"box2"}` before the first `run`.
+
+The cube needs a few mm of clearance per side (it is placed with no padding). The carry height
+clears the tallest configured rim.
 
 The xArm's collision sensitivity is 3. If the controller reports a collision during `press`, lower the
 sensitivity in xArm Studio, or reduce `press_depth_mm`/`press_speed_deg_s`.

@@ -112,7 +112,7 @@ async def main(args):
 
 if __name__ == '__main__':
     p = argparse.ArgumentParser()
-    p.add_argument('--goal', choices=['ring', 'box'], default='box')
+    p.add_argument('--goal', default='box', help='ring or a configured box name')
     p.add_argument('--config', default=str(ROOT/'config'/'code2-attributes.json'))
     p.add_argument('--frame', type=int, default=0, help='saved overview frame (tests/data/overview_N)')
     p.add_argument('--live-detect', action='store_true', help='detect live (arm must be at the overview)')
