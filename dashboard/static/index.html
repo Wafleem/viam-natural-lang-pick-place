@@ -37,6 +37,9 @@
     clip-path:inset(50%); white-space:nowrap; border:0; }
   button.primary { background:var(--uv); border-color:var(--uv); color:#fff; }
   .say-mic { margin:0 0 12px; }
+  .voice-controls { display:flex; flex-wrap:wrap; gap:8px 16px; align-items:center; }
+  .voice-toggle { display:inline-flex; align-items:center; gap:7px; min-height:44px; }
+  .voice-toggle input { width:18px; height:18px; accent-color:var(--uv); }
   #mic-help { display:block; margin-top:6px; }
   button.mic.pill { border-radius:999px; padding:10px 22px; font-size:16px; font-weight:700; background:var(--uv); border:1px solid var(--uv);
     color:#fff; white-space:nowrap; touch-action:none; user-select:none; -webkit-user-select:none; }
@@ -129,8 +132,10 @@
 <!-- RUN -->
 <div class="tab" data-tab="Run">
   <section class="wide say">
-    <div class="say-mic"><button class="mic pill" id="mic" title="Hold to talk, or activate to start and stop" aria-pressed="false" aria-describedby="mic-help"
+    <div class="say-mic"><div class="voice-controls"><button class="mic pill" id="mic" title="Hold to talk, or activate to start and stop" aria-pressed="false" aria-describedby="mic-help"
       onpointerdown="micDown(event)" onpointerup="micUp('pointer')" onpointerleave="micUp('pointer')" onpointercancel="micUp('pointer')" onclick="micClick(event)">🎤 Hold to talk</button>
+      <label class="voice-toggle"><input type="checkbox" id="spoken-replies" checked onchange="toggleSpokenReplies()"> Spoken replies</label>
+      <span class="muted" id="voice-reply-status" role="status" aria-atomic="true"></span></div>
       <span id="mic-help" class="muted">Hold with mouse or touch. With a keyboard, press Enter or Space to start, then again to stop.</span></div>
     <div class="say-input"><input type="text" id="nltext" placeholder="e.g. put the cube in the box" value=""
         onkeydown="if (event.key === 'Enter') nlParse()" aria-label="Command for the robot">
@@ -343,7 +348,7 @@ function needClear() { if (!$('clear').checked) { toast('Tick "workcell clear" f
 // ---- tabs / theme
 const TABS = [...document.querySelectorAll('.tab')].map(t => t.dataset.tab);
 function show(name) {
-  if (name !== 'Run') micUp();
+  if (name !== 'Run') { invalidateVoice(); micUp(); }
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('on', t.dataset.tab === name));
   [...$('tabs').children].forEach(b => { const selected = b.textContent === name; b.classList.toggle('on', selected);
     b.setAttribute('aria-selected', String(selected)); b.tabIndex = selected ? 0 : -1; }); try { localStorage.setItem('uv-tab', name); } catch (e) {}
@@ -376,13 +381,19 @@ async function sendRaw() {
   catch (e) { $('reply').textContent = 'Error: ' + e.message; toast(e.message, true); }
 }
 async function stopAll() { try { await api('/api/command', {action:'stop'}); } catch (e) {} try { await api('/api/arm/stop', {}); toast('Stop sent'); } catch (e) { toast('Stop error: ' + e.message, true); } }
+function presentInterpretation(r) {
+  const c = {...r.command};
+  if (r.moves) { c.workcell_ready = true; c.request_id = 'nl-' + Date.now(); }
+  $('raw').value = JSON.stringify(c, null, 1);
+  say(r.moves ? 'move' : 'ok', r.explanation + (r.moves ? ' — this moves the arm: tick workcell clear, then Send to robot.' : ' — no motion, safe to send.'));
+}
 async function nlParse() {
-  try { const r = await api('/api/nl', {text: val('nltext')}); const c = r.command;
-    if (r.moves) { c.workcell_ready = true; c.request_id = 'nl-' + Date.now(); }
-    $('raw').value = JSON.stringify(c, null, 1);
-    say(r.moves ? 'move' : 'ok', r.explanation + (r.moves ? ' — this moves the arm: tick workcell clear, then Send to robot.' : ' — no motion, safe to send.'));
+  invalidateVoice(); micUp(); const token = voiceGeneration, text = val('nltext');
+  try { const r = await api('/api/nl', {text});
+    if (token !== voiceGeneration || text !== val('nltext')) return false;
+    presentInterpretation(r);
     return true;
-  } catch (e) { say('bad', "Sorry, I didn't understand that. " + e.message); return false; }
+  } catch (e) { if (token === voiceGeneration) say('bad', "Sorry, I didn't understand that. " + e.message); return false; }
 }
 function say(kind, text) { const b = $('nlexplain'); b.dataset.kind = kind; b.textContent = text; }
 function tryEx(b) { $('nltext').value = b.textContent; nlParse(); }
@@ -392,6 +403,55 @@ async function saySend() { if (await nlParse()) await sendRaw(); }
 // and keep the first one the parser understands (helps with accents and misheard words).
 const Speech = window.SpeechRecognition || window.webkitSpeechRecognition;
 let rec = null, guesses = [], micMode = null, micStopping = false;
+const synthesis = window.speechSynthesis && typeof window.SpeechSynthesisUtterance === 'function' ? window.speechSynthesis : null;
+let voiceGeneration = 0, replyGeneration = 0, currentReply = null;
+function stopSpokenReply() {
+  replyGeneration++; currentReply = null;
+  try { synthesis?.cancel(); } catch (e) { /* text feedback remains available */ }
+  $('voice-reply-status').textContent = !synthesis ? 'Spoken replies unavailable in this browser.'
+    : $('spoken-replies').checked ? 'Voice replies on.' : 'Voice replies muted.';
+}
+function invalidateVoice() {
+  voiceGeneration++; stopSpokenReply();
+  if ($('nlexplain').dataset.kind === 'listen') say('idle', 'Voice input stopped. Enter a command or start listening again.');
+}
+function toggleSpokenReplies() {
+  stopSpokenReply();
+  try { localStorage.setItem('uv-spoken-replies', String($('spoken-replies').checked)); } catch (e) {}
+}
+function currentVoice(token) {
+  return token === voiceGeneration && !rec && !document.hidden && $('panel-Run').classList.contains('on');
+}
+function speakReply(message, token, replyToken) {
+  if (!synthesis || !$('spoken-replies').checked || !currentVoice(token) || replyToken !== replyGeneration) return;
+  try {
+    const utterance = new window.SpeechSynthesisUtterance(message); currentReply = utterance;
+    utterance.lang = document.documentElement.lang || 'en';
+    const voices = synthesis.getVoices();
+    const localVoice = voices.find(v => v.localService && v.lang.toLowerCase().startsWith('en') && v.default)
+      || voices.find(v => v.localService && v.lang.toLowerCase().startsWith('en'));
+    if (localVoice) utterance.voice = localVoice;
+    utterance.onend = () => { if (currentReply === utterance) { currentReply = null; $('voice-reply-status').textContent = 'Spoken reply finished.'; } };
+    utterance.onerror = () => { if (currentReply === utterance) { currentReply = null; $('voice-reply-status').textContent = 'Audio unavailable. Read the response below.'; } };
+    $('voice-reply-status').textContent = 'Replying…'; synthesis.speak(utterance);
+  } catch (e) { currentReply = null; $('voice-reply-status').textContent = 'Audio unavailable. Read the response below.'; }
+}
+function spokenInterpretation(result) {
+  const c = result.command; let task = result.explanation.replace(/\s*->\s*/g, ' to ');
+  if (['pick_place', 'dry_run'].includes(c.action)) {
+    const select = c.pick.select, p = c.place, target = p.goal || p.type;
+    const cube = select === 'only' ? 'the cube' : typeof select === 'object' ? `cube number ${select.index + 1}` : `the ${select} cube`;
+    const destination = target === 'home' ? 'to its home spot' : target === 'ring' ? 'onto the ring'
+      : `into the ${p.color ? p.color + ' box' : target}`;
+    task = `${c.action === 'dry_run' ? 'plan moving' : 'move'} ${cube} ${destination}`;
+  }
+  return 'I understood: ' + task + '. ' + (result.moves
+    ? 'Confirm the workcell is clear, then press Send to robot.' : 'Press Send to robot when you are ready.');
+}
+try { $('spoken-replies').checked = localStorage.getItem('uv-spoken-replies') !== 'false'; } catch (e) {}
+if (!synthesis) { $('spoken-replies').checked = false; $('spoken-replies').disabled = true; }
+stopSpokenReply();
+$('nltext').addEventListener('input', () => { invalidateVoice(); micUp(); say('idle', 'Command changed. Press Check to review it.'); });
 function micIdle(session) {
   if (rec !== session) return false;
   rec = null; micMode = null; micStopping = false;
@@ -409,22 +469,23 @@ function micDown(e) {
 // Ignore the pointer click after release so a hold never restarts recognition.
 function micClick(e) { if (e.detail === 0) { if (rec) micUp(); else micStart('toggle'); } }
 function micStart(mode) {
-  if (!Speech) { say('bad', 'Voice input needs Chrome or Edge; this browser has no speech recognition. You can still type.'); return; }
   if (rec) return;
+  invalidateVoice(); const token = voiceGeneration, replyToken = replyGeneration;
+  if (!Speech) { say('bad', 'Voice input needs Chrome or Edge; this browser has no speech recognition. You can still type.'); return; }
   let session;
   try { session = new Speech(); } catch (e) { say('bad', 'Voice input could not start: ' + e.message); return; }
   guesses = []; rec = session; micMode = mode; micStopping = false;
   session.lang = navigator.language || 'en-US'; session.interimResults = true; session.continuous = true; session.maxAlternatives = 5;
   session.onresult = ev => {
-    if (rec !== session) return;
+    if (rec !== session || token !== voiceGeneration) return;
     const finals = [...ev.results].filter(r => r.isFinal);
     guesses = finals.length === 1 ? [...finals[0]].map(a => a.transcript.trim())
       : [finals.map(r => r[0].transcript.trim()).join(' ')];
     $('nltext').value = [...ev.results].map(r => r[0].transcript).join(' ').trim();
   };
-  session.onerror = ev => { if (!micIdle(session)) return; say('bad', 'Voice error: ' + ev.error
+  session.onerror = ev => { if (!micIdle(session) || !currentVoice(token)) return; say('bad', 'Voice error: ' + ev.error
     + (ev.error === 'not-allowed' ? ' (allow the microphone for this page)' : ev.error === 'network' ? ' (this browser cannot reach its speech service; try Chrome)' : '')); };
-  session.onend = () => { if (micIdle(session)) voiceParse(); };
+  session.onend = () => { if (micIdle(session) && currentVoice(token)) voiceParse(token, replyToken); };
   $('mic').classList.add('on'); $('mic').textContent = mode === 'toggle' ? '🎙 Stop listening' : '🎙 Listening…';
   $('mic').setAttribute('aria-pressed', 'true');
   say('listen', mode === 'toggle' ? 'Listening… press Enter or Space again to finish.' : 'Listening… let go of the button when you finish.');
@@ -435,15 +496,29 @@ function micUp(mode) {
   const session = rec; micStopping = true;
   try { session.stop(); } catch (e) { if (micIdle(session)) say('bad', 'Voice input could not stop: ' + e.message); }
 }
-document.addEventListener('visibilitychange', () => { if (document.hidden) micUp(); });
-async function voiceParse() {
+document.addEventListener('visibilitychange', () => { if (document.hidden) { invalidateVoice(); micUp(); } });
+window.addEventListener('pagehide', () => { invalidateVoice(); micUp(); });
+async function voiceParse(token, replyToken) {
   const options = guesses.filter(Boolean);
-  if (!options.length) { if ($('nlexplain').dataset.kind !== 'bad') say('bad', "Didn't catch that. Hold the button and speak again."); return; }
-  let chosen = options[0];
-  for (const text of options) { try { await api('/api/nl', {text}); chosen = text; break; } catch (e) { /* try the next guess */ } }
-  $('nltext').value = chosen;
-  await nlParse();
+  if (!currentVoice(token)) return;
+  if (!options.length) {
+    const message = "I didn't catch that. Please try again, or type your command.";
+    say('bad', message); speakReply(message, token, replyToken); return;
+  }
+  let chosen, result, error;
+  for (const text of options) {
+    try { result = await api('/api/nl', {text}); chosen = text; }
+    catch (e) { error = e; }
+    if (!currentVoice(token)) return;
+    if (result) break;
+  }
+  if (!result) {
+    say('bad', "Sorry, I didn't understand that. " + (error?.message || 'Please try again.'));
+    speakReply("I couldn't match that to a supported command. Please try again, or type your command.", token, replyToken); return;
+  }
+  $('nltext').value = chosen; presentInterpretation(result);
   say($('nlexplain').dataset.kind, `🎤 heard "${chosen}"` + (options.length > 1 && chosen !== options[0] ? ` (best of ${options.length} guesses)` : '') + ' — ' + $('nlexplain').textContent);
+  speakReply(spokenInterpretation(result), token, replyToken);
 }
 async function armdo(command, connection_type) {
   try { const r = await api('/api/arm/do', {command, connection_type}); $('armreply').textContent = pretty(r); toast(r); }
