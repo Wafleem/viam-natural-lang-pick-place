@@ -23,15 +23,14 @@ jobs:
 
   web:
     runs-on: ubuntu-latest
-    if: ${{ hashFiles('code3-web/natural-language-ui/package.json') != '' }}
-    defaults:
-      run:
-        working-directory: code3-web/natural-language-ui
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - id: app
+        run: test -f code3-web/natural-language-ui/package.json && echo "present=true" >> "$GITHUB_OUTPUT" || echo "present=false" >> "$GITHUB_OUTPUT"
+      - if: steps.app.outputs.present == 'true'
+        uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: npm ci
-      - run: node build.mjs
-      - run: node --test test/*.test.mjs
+      - if: steps.app.outputs.present == 'true'
+        working-directory: code3-web/natural-language-ui
+        run: npm ci && node build.mjs && node --test test/*.test.mjs
