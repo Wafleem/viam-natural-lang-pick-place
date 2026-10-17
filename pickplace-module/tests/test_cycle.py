@@ -128,6 +128,7 @@ def test_full_cycle_open_loop_from_overview(settings, kin, urdf, goal):
         for q in path:
             assert kin.within_limits(q, .5)
             assert abs(q[3]) < 360-settings.joint_limit_margin_deg
+            assert goal != 'box' or 150 < q[3] < 210  # box cycle stays on the taught wrist branch
     assert arm.q == pytest.approx(settings.overview_joints_deg)
     assert summary['press_depth_mm'] == 10 and lease.reserved == ''
     json.dumps(summary)
