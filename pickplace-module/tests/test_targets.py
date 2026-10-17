@@ -71,7 +71,10 @@ def test_targets_press_ten_mm_and_keep_margins(settings, observation, kin, goal)
     assert {k: t['press'][k] for k in 'xy'} == {k: t['contact'][k] for k in 'xy'}
     for q in (t['q_above_pick'], t['q_above_place']):
         assert kin.limit_clearance_deg(q) >= settings.joint_limit_margin_deg
-        assert abs(q[3]) < 5  # wrist roll near 0, never the +/-360 bound
+        assert abs(q[3]) <= 360-settings.joint_limit_margin_deg
+    # Box: both ends on the taught wrist branch (J4 ~ 180), like the demonstrated cycle.
+    if goal == 'box':
+        assert all(150 < q[3] < 210 for q in (t['q_above_pick'], t['q_above_place']))
     # Release keeps the nominal (unpressed) grasp height: cube bottom at the goal surface.
     assert t['release']['z'] == pytest.approx(t['goal_top_world_mm'][2], abs=1e-6)
 
@@ -85,8 +88,9 @@ def test_box_goal_centres_cube_and_fits(settings, observation, kin):
     assert min(gaps) > 0
     assert (t['place_yaw_deg']-box['world_yaw_deg']) % 90 == pytest.approx(0, abs=1e-9) or \
         (t['place_yaw_deg']-box['world_yaw_deg']) % 90 == pytest.approx(90, abs=1e-9)
-    # Carry height keeps the cube bottom clearance_mm over the rim.
-    assert t['above_place']['z']-settings.cube_size_mm >= box['rim_z_mm']+settings.clearance_mm-1e-6
+    # Above the box the cube bottom clears the rim by box_entry_clearance_mm before entering.
+    assert t['above_place']['z']-settings.cube_size_mm == pytest.approx(box['rim_z_mm']+settings.box_entry_clearance_mm)
+    assert t['above_pick']['z'] == pytest.approx(t['contact']['z']+settings.clearance_mm)
 
 
 def test_box_fit_rejects_wall_contact(settings):
@@ -106,7 +110,7 @@ def test_multiple_named_boxes(attrs, observation, kin):
     assert s.goals == ['ring', 'box', 'box2']
     t = compute_targets(s, observation, 'box2', kin, s.overview_joints_deg)
     assert t['goal_top_world_mm'][:2] == pytest.approx(second['placement_center_xy_mm'])
-    assert t['above_place']['z']-s.cube_size_mm >= 160+s.clearance_mm-1e-6  # tallest rim governs carry height
+    assert t['above_place']['z']-s.cube_size_mm == pytest.approx(160+s.box_entry_clearance_mm)  # its own rim
     from pickplace.planning import scene_world, allowed_contacts
     labels = {g.label for g in scene_world(s, observation, t, 'placed', 'box2').obstacles[0].geometries}
     assert {'goal-box-floor', 'goal-box2-floor', 'goal-box2-wall-3'} <= labels

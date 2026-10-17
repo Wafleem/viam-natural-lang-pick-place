@@ -31,6 +31,9 @@ sys.path[:0] = [str(MODULE/'tools'), str(MODULE/'src')]
 from connect import app_client, connect  # noqa: E402
 from pickplace.config import Settings  # noqa: E402
 
+sys.path.insert(0, str(ROOT/'nl-integration'))
+from nl_to_command import DESCRIBE, parse, validate  # noqa: E402
+
 PART_ID = 'f5c74a65-a023-4983-a317-1e9a88c88372'
 SERVICE = 'code-2'
 MAX_JOG_DEG, MAX_JOG_SPEED = 10.0, 5.0
@@ -130,6 +133,21 @@ async def command(request):
         return fail(f'{type(e).__name__}: {e}')
 
 
+async def nl(request):
+    """Plain language -> command preview (nothing is sent; the page sends it after review)."""
+    body = await request.json()
+    try:
+        describe = await call(lambda r: code2(r, {'action': 'describe'}))
+    except Exception:
+        describe = DESCRIBE
+    try:
+        result = parse(str(body.get('text', '')), describe)
+        validate(result['command'], describe)
+        return ok(result)
+    except Exception as e:
+        return fail(str(e))
+
+
 async def camera(_):
     async def grab(robot):
         images, _ = await Camera.from_robot(robot, 'cam').get_images(timeout=15)
@@ -161,6 +179,25 @@ async def jog(request):
         return ok(await call(move))
     except web.HTTPException:
         raise
+    except Exception as e:
+        return fail(f'{type(e).__name__}: {e}')
+
+
+ARM_DIAGNOSTICS = {'get_state', 'get_error', 'clear_error', 'get_vacuum_state'}
+
+
+async def arm_do(request):
+    """viam:ufactory driver DoCommands that never move the arm: state, error, clear_error and
+    vacuum state (optionally with connection_type plugin/contact to compare the wiring)."""
+    body = await request.json()
+    key = body.get('command')
+    if key not in ARM_DIAGNOSTICS:
+        return fail('command must be one of '+', '.join(sorted(ARM_DIAGNOSTICS)))
+    cmd = {key: True}
+    if key == 'get_vacuum_state' and body.get('connection_type') in ('plugin', 'contact'):
+        cmd['connection_type'] = body['connection_type']
+    try:
+        return ok(await call(lambda r: Arm.from_robot(r, 'arm').do_command(cmd, timeout=10)))
     except Exception as e:
         return fail(f'{type(e).__name__}: {e}')
 
@@ -229,8 +266,8 @@ def main():
     p.add_argument('--port', type=int, default=8765)
     args = p.parse_args()
     app = web.Application()
-    app.add_routes([web.get('/', index), web.get('/api/state', state), web.post('/api/command', command),
-                    web.get('/api/camera', camera), web.post('/api/arm/jog', jog), web.post('/api/arm/stop', arm_stop),
+    app.add_routes([web.get('/', index), web.get('/api/state', state), web.post('/api/command', command), web.post('/api/nl', nl),
+                    web.get('/api/camera', camera), web.post('/api/arm/jog', jog), web.post('/api/arm/stop', arm_stop), web.post('/api/arm/do', arm_do),
                     web.post('/api/gripper', gripper), web.get('/api/config', get_config), web.post('/api/config', put_config)])
     app.on_cleanup.append(lambda _: ROBOT.drop())
     print(f'Dashboard: http://localhost:{args.port}')
