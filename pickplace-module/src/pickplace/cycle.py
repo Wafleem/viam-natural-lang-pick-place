@@ -474,6 +474,51 @@ class PickPlaceCycle:
         obs.pop('cube', None)
         return obs
 
+    def place_of_detection(self):
+        """Box name if the cube vision just found lies inside a box opening (a cube in the box is within
+        the table-height tolerance), else None (on the table)."""
+        from .calibration import calibrated_xy
+        obs = self.observation or {}
+        xy = (obs.get('sweep') or {}).get('cube_tool_xy_mm')
+        if xy is None and obs.get('cube'):
+            xy = calibrated_xy(self.s.calibration, obs['cube']['top_center_world_mm'])
+        if xy is None:
+            return None
+        xy = np.asarray(xy[:2], float)
+        for name, box in self.s.boxes.items():
+            a = math.radians(box['world_yaw_deg'])
+            d = xy-np.asarray(box['floor_center_world_mm'][:2], float)
+            local = np.array([d[0]*math.cos(a)+d[1]*math.sin(a), -d[0]*math.sin(a)+d[1]*math.cos(a)])
+            if np.all(np.abs(local) <= np.asarray(box['inner_dimensions_mm'], float)/2+20):
+                return name
+        # Not the ring: a cube on the ring sits ~34 mm higher and never passes as a table cube.
+        return None
+
+    async def locate_cube(self, goal, select, remembered):
+        """Vision first, every time: overview, then a sweep. People usually move the cube back by
+        hand, so the remembered placement is only a fallback when the camera cannot see the cube on
+        the table (in the box or up on the ring it fails the table-height check or sits in the box).
+        Returns the source to pick from (None = the cube vision found on the table)."""
+        try:
+            await self.detect(goal, select)
+        except CycleError as e:
+            if remembered is None:
+                raise
+            self.event('cube_not_seen_using_memory', place=remembered['place'], reason=str(e)[:120])
+            self.observation = await self.look_for_obstacles()
+            return remembered
+        place = self.place_of_detection()
+        if place is None:
+            if self.memory.location.get('place') != 'table':
+                self.memory.set('table', how='seen on the table by vision')
+            return None
+        if remembered is not None and remembered['place'] == place:
+            self.event('cube_seen_where_remembered', place=place)
+            self.observation = await self.look_for_obstacles()
+            return remembered
+        raise CycleError(f'The camera sees the cube in the {place}, but code-2 did not put it there. '
+                         f'Take it out, or tell code-2 with {{"action":"set_cube_location","place":"{place}"}}')
+
     async def holding(self, reads=3):
         """Closed loop: the vacuum gripper's holding sensor (reliable since the driver update).
         True only if every one of `reads` quick reads agrees, so one glitch can't fake a grip."""
@@ -496,7 +541,7 @@ class PickPlaceCycle:
             await asyncio.sleep(.1)
         return None
 
-    async def run(self, goal, select='only', source='auto'):
+    async def run(self, goal, select='only', source='auto', on_table='move'):
         """One full cycle to `goal`. The cube comes from vision when it is on the table, or from
         the remembered placement when it sits in a box or on the ring (source='auto').
         On failure the arm stops and suction stays as it was."""
@@ -506,14 +551,12 @@ class PickPlaceCycle:
         await self.acquire_lease()
         try:
             await self.go_to_overview(Planner(self.motion, self.s, self.kin))
-            remembered = self.memory.pickable_source() if source == 'auto' else source
-            if remembered is None:
-                await self.detect(goal, select)
-            else:
-                self.event('using_remembered_cube', place=remembered['place'])
-                self.observation = await self.look_for_obstacles()
-                if goal == 'ring' and not self.s.ring_spot and 'ring' not in self.observation:
-                    raise CycleError('Ring goal needs the ring in view from the overview')
+            remembered = await self.locate_cube(goal, select, self.memory.pickable_source() if source == 'auto' else source)
+            if remembered is None and on_table == 'skip':
+                self.event('complete', goal=goal, detail='cube is already on the table; nothing to do')
+                return {'moved': False, 'detail': 'cube is already on the table', 'cube_location': copy.deepcopy(self.memory.location)}
+            if remembered is not None and goal == 'ring' and not self.s.ring_spot and 'ring' not in self.observation:
+                raise CycleError('Ring goal needs the ring in view from the overview')
             if remembered is not None and remembered['place'] == goal:
                 raise CycleError(f'The cube is already at {goal}')
             for attempt in range(1, self.s.pick_retries+2):
@@ -577,12 +620,7 @@ class PickPlaceCycle:
         await self.acquire_lease()
         try:
             await self.go_to_overview(Planner(self.motion, self.s, self.kin))
-            remembered = self.memory.pickable_source()
-            if remembered is None:
-                await self.detect(goal, select)
-            else:
-                self.event('using_remembered_cube', place=remembered['place'])
-                self.observation = await self.look_for_obstacles()
+            remembered = await self.locate_cube(goal, select, self.memory.pickable_source())
             if remembered is not None and remembered['place'] == goal:
                 raise CycleError(f'The cube is already at {goal}')
             plans = dict((name, (path, speed)) for name, path, speed in await self.plan(goal, source=remembered))
@@ -670,15 +708,12 @@ class PickPlaceCycle:
             await self.release_lease()
 
     async def reset_cube(self):
-        """Put the cube back on its home table spot, from wherever code-2 last placed it."""
+        """Put the cube back on its home table spot from the box or ring (vision first; a cube already
+        on the table is left where it is)."""
         if not self.s.home:
             raise CycleError('No home spot configured (attribute "home": {"xy_mm": [x, y], "yaw_deg": a})')
-        place = self.memory.location.get('place')
-        if place == 'home':
-            return {'moved': False, 'detail': 'cube is already home', 'cube_location': copy.deepcopy(self.memory.location)}
-        if place == 'unknown':
-            raise CycleError('Cube location unknown: put it on the table in view (or set_cube_location), then retry')
-        return await self.run('home')
+        # Looks first: if someone already put the cube back on the table, nothing moves but the camera.
+        return await self.run('home', on_table='skip')
 
     def set_location(self, place, goals):
         """Operator correction after moving the cube by hand. No motion."""
