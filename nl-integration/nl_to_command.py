@@ -30,8 +30,50 @@ def _words(text):
     return re.findall(r"[a-z0-9_'-]+", text.lower())
 
 
+# Speech recognisers mishear short nouns, especially with an accent. Map common sound-alikes,
+# then fuzzy-match leftover unknown words against the object/place vocabulary. Motion-only words
+# (reset, home) are never guessed; a guessed command still goes through review before sending.
+SOUND_ALIKES = {
+    'cute': 'cube', 'cubed': 'cube', 'cubes': 'cube', 'cub': 'cube', 'tube': 'cube', 'queue': 'cube',
+    'q': 'cube', 'cuba': 'cube', 'kube': 'cube', 'coop': 'cube',
+    'rink': 'ring', 'wring': 'ring', 'rings': 'ring', 'rang': 'ring', 'rung': 'ring',
+    'books': 'box', 'bocks': 'box', 'bucks': 'box', 'fox': 'box', 'pox': 'box', 'boxes': 'box', 'bach': 'box',
+    'hope': 'hoop', 'hoops': 'hoop', 'write': 'right', 'rite': 'right', 'wright': 'right',
+    'lift': 'left', 'orage': 'orange', 'oranges': 'orange',
+}
+FUZZY_TARGETS = ['cube', 'block', 'ring', 'hoop', 'box', 'bin', 'basket', 'orange', 'blue', 'left', 'right',
+                 'nearest', 'closest', 'farthest', 'furthest', 'leftmost', 'rightmost']
+KNOWN = set(FUZZY_TARGETS) | set(SELECT_WORDS) | set(ORDINALS) | set(RING_WORDS) | {
+    'put', 'place', 'move', 'pick', 'up', 'drop', 'grab', 'take', 'set', 'bring', 'carry', 'the', 'a', 'an', 'it',
+    'in', 'into', 'on', 'onto', 'to', 'top', 'of', 'inside', 'and', 'then', 'can', 'you', 'could', 'please',
+    'stop', 'halt', 'reset', 'home', 'go', 'back', 'table', 'status', 'check', 'plan', 'release', 'let'}
+
+
+def normalize(text):
+    """-> text with likely mishearings/typos replaced; `parse` uses it and reports any change."""
+    import difflib
+    out = []
+    for word in _words(text):
+        fixed = SOUND_ALIKES.get(word, word)
+        if fixed == word and word not in KNOWN and len(word) >= 3 and not word.isdigit():
+            close = difflib.get_close_matches(word, FUZZY_TARGETS, n=1, cutoff=0.75)
+            fixed = close[0] if close else word
+        out.append(fixed)
+    return ' '.join(out)
+
+
 def parse(text, describe=DESCRIBE):
     """-> {'command': dict, 'moves': bool, 'explanation': str} or raises ValueError."""
+    heard = ' '.join(_words(text))
+    fixed = normalize(text)
+    result = _parse(fixed, describe)
+    if fixed != heard:
+        result['heard_as'] = fixed
+        result['explanation'] += f' (read as "{fixed}")'
+    return result
+
+
+def _parse(text, describe):
     low, words = text.lower(), _words(text)
     if any(w in words for w in ('stop', 'halt', 'freeze', 'abort')):
         return {'command': {'action': 'stop'}, 'moves': False, 'explanation': 'Stop the arm now'}
@@ -44,15 +86,17 @@ def parse(text, describe=DESCRIBE):
     if any(w in words for w in ('release', 'drop', 'let')) and 'go' in words or 'suction off' in low:
         return {'command': {'action': 'release'}, 'moves': False, 'explanation': 'Switch suction off'}
 
-    if 'cube' not in words and not any(w in words for w in ('block', 'it', 'object')):
-        raise ValueError('I only know how to move the cube; try "put the cube in the box"')
+    goals = describe['place']['goals']
+    generic = {'box', 'bin', 'container', 'basket'}
+    # There is one cube, so naming only where it goes ("box", "the ring please") is enough.
+    place_words = set(RING_WORDS) | generic | {g['name'].lower() for g in goals} | {g.get('color') for g in goals if g.get('color')}
+    if 'cube' not in words and not any(w in words for w in ('block', 'it', 'object')) and not place_words & set(words):
+        raise ValueError('I only know how to move the cube to the ring or the box; try "put the cube in the box"')
     select = next((SELECT_WORDS[w] for w in words if w in SELECT_WORDS), None)
     index = next((ORDINALS[w] for w in words if w in ORDINALS), None)
     pick = {'object': 'cube', 'select': {'index': index} if index is not None else (select or 'only')}
 
-    goals = describe['place']['goals']
     place = None
-    generic = {'box', 'bin', 'container', 'basket'}
     for g in goals:  # specific box names first ("box2", "blue_box"); plain "box" is not a name
         if g['type'] == 'box' and g['name'].lower() not in generic and g['name'].lower() in words:
             place = {'goal': g['name']}
@@ -73,8 +117,10 @@ def parse(text, describe=DESCRIBE):
     check = any(p in low for p in CHECK_WORDS)
     action = 'dry_run' if check else 'pick_place'
     target = place.get('goal') or place.get('color', '') + (' box' if 'color' in place else place.get('type', ''))
+    sel = pick['select']
+    which = '' if sel == 'only' else f'{sel} ' if isinstance(sel, str) else f'#{index + 1} '
     return {'command': {'action': action, 'pick': pick, 'place': place}, 'moves': action in MOVES,
-            'explanation': f"{'Plan (no motion)' if check else 'Pick'} the {pick['select'] if isinstance(pick['select'], str) else 'cube #'+str(index+1)} cube -> {target}"}
+            'explanation': f"{'Plan (no motion)' if check else 'Pick'} the {which}cube -> {target}"}
 
 
 def validate(command, describe=DESCRIBE):
