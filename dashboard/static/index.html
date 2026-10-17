@@ -95,6 +95,7 @@
     <h2>Full flows · big buttons</h2>
     <div class="flows">
       <button class="flow safe" onclick="flow('check')">PRE-FLIGHT<small>self_test + live plan check · no motion</small></button>
+      <button class="flow" onclick="flow('scan')">SCAN<small>camera only: overview + sweep to find the cube</small></button>
       <button class="flow" onclick="flow('recover')">RECOVER &amp; HOME<small>clear error → recover limits → overview</small></button>
       <button class="flow" onclick="flow('box')">CUBE → BOX<small>overview → dry run → pick &amp; place</small></button>
       <button class="flow" onclick="flow('ring')">CUBE → RING<small>overview → dry run → pick &amp; place</small></button>
@@ -429,6 +430,10 @@ async function flow(name) {
       await step('recover_limits', go('recover_limits'));
       await step('reset → overview', go('reset'));
       await step('self_test', still('self_test'));
+    } else if (name === 'scan') {
+      await step('scan (overview + sweep)', go('scan'));
+      const r = (await api('/api/command', {action:'status'})).last_result || {};
+      stepLine(`cube at ${JSON.stringify(r.cube_xy_mm)} yaw ${r.cube_yaw_deg}° via ${r.found_by}; ring at ${JSON.stringify(r.ring_xy_mm)}`, 'ok');
     } else if (name === 'home') {
       await step('reset_cube → home', go('reset_cube'));
       const o = ((await api('/api/command', {action:'status'})).last_result || {}).outcome; if (o) stepLine('vision: ' + o.detail, o.cube_at_goal === false ? 'bad' : 'ok');

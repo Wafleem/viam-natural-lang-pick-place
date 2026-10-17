@@ -10,6 +10,7 @@ avoidance and centring come from the motion planner.
 """
 import asyncio
 import copy
+import json
 import time
 import uuid
 from datetime import datetime, timezone
@@ -188,6 +189,102 @@ class PickPlaceCycle:
                 'next_step': 'Check the opening with a tape measure, then add the candidate to the "boxes" attribute'}
 
     async def detect(self, goal, select='only'):
+        """Find the cube: the overview first, then a camera sweep if it is not fully in view."""
+        try:
+            return await self.detect_at_overview(goal, select)
+        except CycleError as e:
+            text = str(e)
+            if not any(k in text for k in ('No cube in view', 'clipped', 'Cube top surface', 'Need exactly one full cube')):
+                raise
+            self.event('cube_not_in_overview', reason=text[:120])
+        return await self.sweep_for_cube(goal, select)
+
+    def overview_visible(self, xy, z=None, margin=25):
+        """Is a tool-XY point (at cube-top height) inside the overview image?"""
+        cal = self.s.calibration
+        if not cal.get('camera_pose_world') or not cal.get('camera_intrinsics'):
+            return None
+        I, cam = cal['camera_intrinsics'], np.array(pose_matrix(cal['camera_pose_world']))
+        a = np.radians(cal['yaw_correction_deg'])
+        raw = np.array([[np.cos(a), np.sin(a)], [-np.sin(a), np.cos(a)]]) @ (np.asarray(xy[:2])-np.asarray(cal['xy_offset_mm']))
+        c = np.linalg.inv(cam) @ np.r_[raw, cal['observed_cube_z_mm'] if z is None else z, 1]
+        if c[2] <= 0:
+            return False
+        u, v = I['focalXPx']*c[0]/c[2]+I['centerXPx'], I['focalYPx']*c[1]/c[2]+I['centerYPx']
+        return margin < u < I['widthPx']-margin and margin < v < I['heightPx']-margin
+
+    async def sweep_for_cube(self, goal, select='only'):
+        """Pan the camera (base joint) to nearby views until the cube is fully seen.
+
+        Positions from a sweep view are anchored on the ring: its overview position is known, so
+        (ring at overview) - (ring seen from this view) corrects everything seen from this view.
+        The arm returns to the overview before planning; the observation is expressed as if seen
+        from there, so the rest of the cycle is unchanged.
+        """
+        from .calibration import calibrated_xy
+        from .planning import Planner, box_obstacles, prism
+        from viam.proto.common import GeometriesInFrame, WorldState
+        cal, s = self.s.calibration, self.s
+        ref = await self.capture(require_ring=False, require_cube=False)
+        if 'ring' in ref:
+            ring_ref = calibrated_xy(cal, ref['ring']['top_center_world_mm'])
+        elif s.ring_spot:
+            ring_ref = np.array(s.ring_spot['xy_mm'])
+        else:
+            raise CycleError('Cube not in the overview view, and no ring to anchor a camera sweep')
+        planner = Planner(self.motion, s, self.kin)
+        world = WorldState(obstacles=[GeometriesInFrame(reference_frame='world', geometries=[
+            prism('scan-objects-envelope', [400, 0, 125], [600, 800, 350])]+box_obstacles(s))])
+        g = cal['yaw_correction_deg']
+        a = np.radians(g)
+        to_raw = np.array([[np.cos(a), np.sin(a)], [-np.sin(a), np.cos(a)]])
+        found, tried = None, []
+        try:
+            for off in s.sweep_j1_offsets_deg:
+                q = list(s.overview_joints_deg)
+                q[0] += off
+                path = await planner.segment(await self.joints(), world, goal_deg=q, margin=1.0)
+                await self.execute(f'sweep_{off:+g}', path, s.sweep_speed_deg_s)
+                await asyncio.sleep(.6)
+                hits = []
+                for _ in range(4):
+                    obs = await self.capture(require_ring=False, select=select, require_cube=False)
+                    issues = [i for i in obs.get('issues', []) if not i.startswith('Depth/world tabletop')]
+                    if issues or 'cube' not in obs or 'ring' not in obs:
+                        continue
+                    corr = ring_ref-calibrated_xy(cal, obs['ring']['top_center_world_mm'])
+                    hits.append((calibrated_xy(cal, obs['cube']['top_center_world_mm'])+corr, obs['cube']['world_yaw_deg']+g, obs['cube'], corr))
+                    await asyncio.sleep(.1)
+                tried.append({'pan_deg': off, 'frames_with_cube_and_ring': len(hits)})
+                if len(hits) >= 3:
+                    xy = np.median([h[0] for h in hits], axis=0)
+                    yaws = np.array([h[1] for h in hits])
+                    ref_yaw = yaws[0]
+                    yaw = float(np.median(ref_yaw+(yaws-ref_yaw+45) % 90-45))
+                    if max(np.linalg.norm(h[0]-xy) for h in hits) <= 5:
+                        found = (xy, yaw, hits[-1][2], np.median([h[3] for h in hits], axis=0), off)
+                        break
+            if found is None:
+                raise CycleError('Cube not found in the overview or the sweep views: '+json.dumps(tried))
+        finally:
+            back = await planner.segment(await self.joints(), world, goal_deg=s.overview_joints_deg, margin=1.0)
+            if len(back) > 1 and max(abs(x-y) for x, y in zip(back[0], back[-1])) > .1:
+                await self.execute('sweep_return', back, s.sweep_speed_deg_s)
+            await asyncio.sleep(.6)
+        xy, yaw, cube, corr, off = found
+        obs = copy.deepcopy(ref)
+        obs['camera_pose_world'], obs['camera_intrinsics'] = cal['camera_pose_world'], cal['camera_intrinsics']
+        obs['observation_joints_deg'] = list(s.overview_joints_deg)
+        raw = to_raw @ (xy-np.asarray(cal['xy_offset_mm']))
+        cube = {**cube, 'top_center_world_mm': [float(raw[0]), float(raw[1]), float(cal['observed_cube_z_mm'])],
+                'world_yaw_deg': float((yaw-g+45) % 90-45)}
+        obs['cube'], obs['cubes'] = cube, [cube]
+        obs['sweep'] = {'pan_deg': off, 'ring_anchor_correction_mm': [float(c) for c in corr], 'cube_tool_xy_mm': [float(v) for v in xy]}
+        self.observation = native(obs)
+        self.event('cube_found_by_sweep', pan_deg=off, xy=[round(float(v), 1) for v in xy])
+        return self.observation
+
+    async def detect_at_overview(self, goal, select='only'):
         """Five consecutive frames; four (incl. the newest two) must agree on the selected cube."""
         self.event('detecting', select=select)
         frames, last = [], ''
@@ -241,7 +338,7 @@ class PickPlaceCycle:
         if picked is not None:
             still = any(np.linalg.norm(np.subtract(c[:2], picked[:2])) < 40 for c in cubes)
             result['cube_left_pick_spot'] = not still
-        if goal == 'home':
+        if goal == 'home' and self.overview_visible(self.s.home['xy_mm']):
             from .calibration import calibrated_xy
             result['cube_at_goal'] = any(np.linalg.norm(calibrated_xy(self.s.calibration, c)-self.s.home['xy_mm']) < 40 for c in cubes)
         if result.get('cube_left_pick_spot') is False:
@@ -385,6 +482,31 @@ class PickPlaceCycle:
             return
         self.memory.set(goal, t['goal_top_world_mm'], t['place_yaw_deg'], t['grasp']['tcp_in_cube'],
                         how='placed by code-2' + (' and seen there' if outcome.get('cube_at_goal') else ''))
+
+    async def scan(self, select='only'):
+        """Camera only: go to the overview, find the ring, and find the cube (sweeping if needed)."""
+        self.events = []
+        await self.preflight()
+        await self.acquire_lease()
+        try:
+            await self.go_to_overview(Planner(self.motion, self.s, self.kin))
+            obs = await self.detect('box', select)
+            from .calibration import calibrated_xy
+            cube = obs.get('sweep', {}).get('cube_tool_xy_mm') or calibrated_xy(self.s.calibration, obs['cube']['top_center_world_mm']).tolist()
+            out = {'cube_xy_mm': [round(float(v), 1) for v in cube],
+                   'cube_yaw_deg': round(float(obs['cube']['world_yaw_deg']+self.s.calibration['yaw_correction_deg']), 1),
+                   'found_by': 'sweep' if 'sweep' in obs else 'overview', 'sweep': obs.get('sweep')}
+            if 'ring' in obs:
+                out['ring_xy_mm'] = [round(float(v), 1) for v in calibrated_xy(self.s.calibration, obs['ring']['top_center_world_mm'])]
+            if self.memory.location.get('place') in ('unknown', 'table'):
+                self.memory.set('table', how='seen by scan')
+            self.event('scan_done', **{k: v for k, v in out.items() if k != 'sweep'})
+            return out
+        except BaseException:
+            await self.stop_arm()
+            raise
+        finally:
+            await self.release_lease()
 
     async def reset_cube(self):
         """Put the cube back on its home table spot, from wherever code-2 last placed it."""
