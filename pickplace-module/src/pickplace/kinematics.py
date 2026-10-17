@@ -131,7 +131,9 @@ class ArmKinematics:
                     q = self._normalize(q, seed, margin_deg)
                     if q is not None:
                         solutions.append(q)
-            if solutions:
+            # Accept the fast answer only when it stays close to the seed; otherwise search fully
+            # and keep the nearest (a far "valid" solution may fold the elbow into an obstacle).
+            if solutions and min(sum(abs(a-b) for a, b in zip(q, seed)) for q in solutions) <= 120:
                 break
         if not solutions:
             raise ValueError(f'No IK solution keeps {margin_deg:g} deg from every joint limit')
