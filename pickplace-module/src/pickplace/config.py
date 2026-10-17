@@ -107,6 +107,27 @@ class Settings:
     def goals(self):
         return ['ring']+list(self.boxes)
 
+    def resolve_place(self, place):
+        """Web/NL place target -> goal name. Accepts "ring", a box name, or
+        {"goal": name} / {"type": "ring"|"box"} / {"color": "orange"} (first match)."""
+        if isinstance(place, str):
+            place = {'goal': place}
+        if not isinstance(place, dict):
+            raise ValueError('place must be a goal name or an object')
+        if place.get('goal') is not None:
+            goal = place['goal']
+        elif place.get('type') == 'ring':
+            goal = 'ring'
+        else:
+            colour = place.get('color')
+            matches = [n for n, b in self.boxes.items() if colour is None or b.get('color') == str(colour).lower()]
+            if place.get('type') not in (None, 'box') or not matches:
+                raise ValueError('No configured place target matches '+str(place))
+            goal = matches[0]
+        if goal not in self.goals:
+            raise ValueError('place goal must be one of: '+', '.join(self.goals))
+        return goal
+
     def dependencies(self):
         names = [self.arm, self.gripper, self.camera, self.motion]
         return names+([self.lease_service] if self.lease_service else [])
@@ -132,6 +153,12 @@ def _box(raw, label):
         if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):
             raise ValueError(f'{label}.{key} must be a finite number')
         box[key] = float(v)
+    for key in ('color', 'label'):
+        if key in raw:
+            if not isinstance(raw[key], str) or not raw[key]:
+                raise ValueError(f'{label}.{key} must be a non-empty string')
+            box[key] = raw[key].lower() if key == 'color' else raw[key]
+    box.setdefault('color', 'orange')
     if min(box['inner_dimensions_mm']) <= 0 or box['rim_z_mm'] <= box['floor_center_world_mm'][2]:
         raise ValueError(label+' needs a positive opening and a rim above its floor')
     return box

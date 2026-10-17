@@ -115,7 +115,7 @@ class PickPlaceCycle:
             await asyncio.sleep(self.s.release_dwell_s)
 
     # ---- perception --------------------------------------------------------
-    async def capture(self, require_ring):
+    async def capture(self, require_ring, select='only'):
         q0 = await self.joints()
         props = MessageToDict(await self.camera.get_properties(timeout=5))
         pose = MessageToDict(await self.motion.get_pose(self.s.camera, 'world', timeout=5))['pose']
@@ -134,7 +134,7 @@ class PickPlaceCycle:
             raise CycleError('Arm moved during camera capture')
         attrs = {'cube_size_mm': self.s.cube_size_mm, 'table_z_mm': self.s.table_z_mm}
         depth_mm = decode_depth(depth.data)
-        obs = await asyncio.to_thread(analyze, bgr, depth_mm, props, pose, attrs, require_ring)
+        obs = await asyncio.to_thread(analyze, bgr, depth_mm, props, pose, attrs, require_ring, select)
         obs.update(capture_time=stamp, observation_joints_deg=q0)
         self.last_frame = (bgr, depth_mm, props, pose)
         return obs
@@ -169,12 +169,12 @@ class PickPlaceCycle:
         return {'candidate': candidate, 'frames': found,
                 'next_step': 'Check the opening with a tape measure, then add the candidate to the "boxes" attribute'}
 
-    async def detect(self, goal):
-        """Five consecutive frames; four (incl. the newest two) must agree."""
-        self.event('detecting')
+    async def detect(self, goal, select='only'):
+        """Five consecutive frames; four (incl. the newest two) must agree on the selected cube."""
+        self.event('detecting', select=select)
         frames, last = [], ''
         for i in range(9):
-            obs = await self.capture(require_ring=goal == 'ring')
+            obs = await self.capture(require_ring=goal == 'ring', select=select)
             issues = [e for e in obs.get('issues', []) if not e.startswith('Depth/world tabletop differs')]
             if issues:
                 raise CycleError('; '.join(issues))
@@ -265,14 +265,14 @@ class PickPlaceCycle:
         }
         return plans
 
-    async def run(self, goal):
+    async def run(self, goal, select='only'):
         """One full cycle. On failure the arm stops and suction stays as it was."""
         self.events = []
         await self.preflight()
         await self.acquire_lease()
         try:
             await self.go_to_overview(Planner(self.motion, self.s, self.kin))
-            await self.detect(goal)
+            await self.detect(goal, select)
             plans = dict((name, (path, speed)) for name, path, speed in await self.plan(goal))
             for name in ('approach', 'descend'):
                 await self.execute(name, *plans[name])
@@ -343,13 +343,13 @@ class PickPlaceCycle:
         self.event('self_test_done', ok=report['ok'])
         return report
 
-    async def dry_run(self, goal):
+    async def dry_run(self, goal, select='only'):
         """Detect and plan at the overview without moving anything."""
         await self.preflight()
         q = await self.joints()
         if max(abs(a-b) for a, b in zip(q, self.s.overview_joints_deg)) > .25:
             raise CycleError('Dry run detects from the calibrated overview; run {"action":"reset"} first')
-        await self.detect(goal)
+        await self.detect(goal, select)
         await self.plan(goal)
         self.event('planned', goal=goal)
         return copy.deepcopy(self.plan_summary)
