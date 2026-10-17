@@ -76,7 +76,9 @@ class Settings:
         {'frame': 'wall-front', 'dims_mm': [100.0, 3000.0, 483.0]},
         {'frame': 'wall-front-2', 'dims_mm': [100.0, 3000.0, 1277.0]},
         {'frame': 'ceiling', 'dims_mm': [3000.0, 3000.0, 100.0]},
-        {'frame': 'cardboard-box', 'dims_mm': [349.0, 286.0, 254.0]}])
+        {'frame': 'box-shell-floor', 'dims_mm': [349.0, 286.0, 10.0]}, {'frame': 'box-shell-top', 'dims_mm': [349.0, 286.0, 10.0]},
+        {'frame': 'box-shell-back', 'dims_mm': [10.0, 286.0, 254.0]}, {'frame': 'box-shell-left', 'dims_mm': [349.0, 10.0, 254.0]},
+        {'frame': 'box-shell-right', 'dims_mm': [349.0, 10.0, 254.0]}])
     carry_clearance_mm: float = 50.0  # planner keeps this from those obstacles; the sweep check half of it
     carry_upright_deg: float = 15.0  # carried joint moves keep the tool within this of vertical (no cube swing)
     box_entry_clearance_mm: float = 30.0
