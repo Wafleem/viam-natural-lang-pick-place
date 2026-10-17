@@ -1,0 +1,47 @@
+{
+  "capture_time": "2026-10-16T23:02:40.237Z",
+  "camera_pose_world": {
+    "x": 202.05209552128025,
+    "y": 50.86628639661037,
+    "z": 627.611542889696,
+    "oX": 0.2961118578535178,
+    "oY": 0.1102224825219388,
+    "oZ": -0.948772244527231,
+    "theta": -77.33882551194696
+  },
+  "properties": {
+    "supportsPcd": true,
+    "intrinsicParameters": {
+      "widthPx": 1280,
+      "heightPx": 720,
+      "focalXPx": 920.016357421875,
+      "focalYPx": 920.522705078125,
+      "centerXPx": 639.3700561523438,
+      "centerYPx": 364.5325927734375
+    },
+    "distortionParameters": {
+      "model": "inverse_brown_conrady",
+      "parameters": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "extrinsicParameters": {
+      "translation": {},
+      "orientation": {
+        "oZ": 1.0
+      }
+    }
+  },
+  "observation_joints_deg": [
+    -4.884027084421052,
+    -33.22272655695361,
+    -78.57937979708325,
+    187.7903548517328,
+    -94.99998784487263,
+    -190.8119758990331
+  ]
+}
