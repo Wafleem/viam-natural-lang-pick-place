@@ -188,7 +188,7 @@ def test_service_command_guards(settings, kin, urdf, attrs):
     with pytest.raises(ValueError, match='workcell_ready'):
         asyncio.run(svc.do_command({'action': 'run', 'goal': 'box'}))
     with pytest.raises(ValueError, match='Unknown action'):
-        asyncio.run(svc.do_command({'action': 'start'}))
+        asyncio.run(svc.do_command({'action': 'jump'}))
     with pytest.raises(ValueError, match='goal must be one of'):
         asyncio.run(svc.do_command({'action': 'run', 'goal': 'shelf', 'workcell_ready': True}))
     status = asyncio.run(svc.do_command({'action': 'status'}))

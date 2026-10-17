@@ -43,7 +43,7 @@ from .vision_geometry import CUBE_SELECTORS
 IMPLEMENTATION = 'pickplace-v1-open-loop-suction-press+dynamic-scene'
 LOGGER = getLogger(__name__)
 API_VERSION = 1
-CYCLE_ACTIONS = {'pick_place', 'run', 'box_once', 'ring_once'}
+CYCLE_ACTIONS = {'pick_place', 'run', 'box_once', 'ring_once', 'start'}  # start: pre-0.0.25 clients
 MOTION_ACTIONS = CYCLE_ACTIONS | {'reset', 'recover_limits'}
 STILL_ACTIONS = {'dry_run', 'measure_box', 'self_test'}  # background tasks that never move the arm
 
@@ -84,8 +84,12 @@ class PickPlaceService(Generic, EasyResource):
         return {
             'implementation': IMPLEMENTATION, 'state': self.state, 'stage': c.stage, 'busy': self.busy(),
             'error': self.error, 'request_id': self.request_id, 'default_goal': s.default_goal,
-            'goals': s.goals, 'box_tracking': s.box_tracking,
-            'scene': copy.deepcopy(c.scene_report),
+            'goals': s.goals, 'action': getattr(self, 'action', ''),
+            'box_tracking': s.box_tracking, 'scene': copy.deepcopy(c.scene_report),
+            # Fields the code-3 web app (code3-web) checks before allowing a send.
+            'available_goals': s.goals, 'calibrated': bool(s.calibration),
+            'goal_details': [{'name': 'ring', 'type': 'ring'}]+[
+                {'name': n, 'type': 'box', 'color': b.get('color')} for n, b in s.boxes.items()],
             'suction': {'mode': 'open_loop', 'holding_feedback_used': False, 'press_depth_mm': s.press_depth_mm,
                         'suction_dwell_s': s.suction_dwell_s, 'release_dwell_s': s.release_dwell_s},
             'speeds_deg_s': {'travel': s.travel_speed_deg_s, 'approach': s.approach_speed_deg_s, 'press': s.press_speed_deg_s},
@@ -98,7 +102,7 @@ class PickPlaceService(Generic, EasyResource):
     async def _work(self, action, args):
         goal, select = args.get('goal'), args.get('select', 'only')
         try:
-            self.state = 'running '+action
+            self.state, self.action = 'running', action
             if action in CYCLE_ACTIONS:
                 self.last_result = await self.cycle.run(goal, select)
             elif action == 'reset':
@@ -135,6 +139,7 @@ class PickPlaceService(Generic, EasyResource):
                                                           'request_id': 'unique-id-per-attempt'}},
                 'dry_run': {'moves': False, 'example': {'action': 'dry_run', 'pick': {'select': 'only'}, 'place': {'type': 'ring'}}},
                 'run': {'moves': True}, 'box_once': {'moves': True}, 'ring_once': {'moves': True},
+                'start': {'moves': True, 'note': 'legacy alias of run, kept for older clients'},
                 'reset': {'moves': True}, 'recover_limits': {'moves': True},
                 'self_test': {'moves': False}, 'measure_box': {'moves': False}, 'status': {'moves': False},
                 'describe': {'moves': False}, 'release': {'moves': False}, 'stop': {'moves': False},
