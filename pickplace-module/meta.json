@@ -1,0 +1,24 @@
+{
+  "$schema": "https://dl.viam.dev/module.schema.json",
+  "module_id": "hackathons:armfarm19-vision-pickplace",
+  "visibility": "private",
+  "url": "",
+  "description": "armfarm19 vision pick-and-place: white cube to black ring or orange Post-it box; open-loop suction press",
+  "models": [
+    {
+      "api": "rdk:service:generic",
+      "model": "hackathons:armfarm19-vision-pickplace:generic-service"
+    }
+  ],
+  "applications": null,
+  "entrypoint": "dist/main/main",
+  "first_run": "",
+  "build": {
+    "build": "./build.sh",
+    "setup": "./setup.sh",
+    "path": "dist/archive.tar.gz",
+    "arch": [
+      "linux/amd64"
+    ]
+  }
+}

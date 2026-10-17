@@ -1,0 +1,659 @@
+{
+ "aligned_depth_enabled": true,
+ "ignore_cardboard": true,
+ "cube_size_mm": 200,
+ "table_z_mm": -23,
+ "max_speed_deg_s": 20,
+ "clearance_mm": 100,
+ "task_calibration": {
+  "observation_joints_deg": [
+   -4.8845214193622315,
+   -33.2225455569406,
+   -78.57937979708325,
+   187.79215802167369,
+   -94.99998784487263,
+   -190.81306872930028
+  ],
+  "yaw_correction_deg": -2.1246113805509466,
+  "xy_offset_mm": [
+   5.072548099279658,
+   4.133742342508064
+  ],
+  "pickup_tcp_z_mm": 190.30335649278322,
+  "place_tcp_z_mm": 224.31804916394577,
+  "observed_cube_z_mm": 219.57872509966765,
+  "observed_ring_z_mm": 52.86793949818397,
+  "residual_mm": 1.5595613350022388,
+  "scope": "fixed wrist overview; same cube/ring resting on same table; taught contact heights",
+  "validation": {
+   "frame_count": 6,
+   "withheld_frame_errors": [
+    {
+     "pickup_mm": 1.589329102907765,
+     "place_mm": 1.6176360145319912,
+     "edge_yaw_deg": -2.0936968527185087
+    },
+    {
+     "pickup_mm": 0.9902770177280432,
+     "place_mm": 1.2590165084479112,
+     "edge_yaw_deg": -2.1038055930716695
+    },
+    {
+     "pickup_mm": 0.6766743972659449,
+     "place_mm": 1.7544837182832407,
+     "edge_yaw_deg": -2.0757516088123253
+    }
+   ],
+   "operator_confirmed_original_spots": true,
+   "captured_at": "2026-10-16T18:39:03.910Z",
+   "reference_limitation": "Taught contacts are assumed to represent object centers; residuals measure consistency, not independent absolute metrology."
+  },
+  "camera_pose_world": {
+   "x": 202.05206091026335,
+   "y": 50.8691153507691,
+   "z": 627.6133531630869,
+   "oX": 0.29611269764469184,
+   "oY": 0.11025111252624487,
+   "oZ": -0.9487686559326828,
+   "theta": -77.33503105586571
+  },
+  "camera_intrinsics": {
+   "widthPx": 1280,
+   "heightPx": 720,
+   "focalXPx": 920.016357421875,
+   "focalYPx": 920.522705078125,
+   "centerXPx": 639.3700561523438,
+   "centerYPx": 364.5325927734375
+  }
+ },
+ "grasp_toward_image_top_mm": 15,
+ "placement_correction_world_xy_mm": [
+  9.534296774206078,
+  -15.333753734481174
+ ],
+ "placement_world_yaw_deg": 0,
+ "search_views": [
+  {
+   "id": "box_focused",
+   "validated_path": true,
+   "joints_deg": [
+    -10.0,
+    -55.0,
+    -78.57937979708325,
+    170.0,
+    -95.0,
+    -200.0
+   ]
+  },
+  {
+   "id": "box_mid",
+   "validated_path": true,
+   "joints_deg": [
+    0.0,
+    -45.0,
+    -78.57937979708325,
+    170.0,
+    -95.0,
+    -180.0
+   ]
+  },
+  {
+   "id": "box_near_rim",
+   "validated_path": true,
+   "joints_deg": [
+    0,
+    -35,
+    -78.57937979708325,
+    170,
+    -95,
+    -180
+   ]
+  }
+ ],
+ "sweep_views": [
+  {
+   "id": "pan_left8",
+   "validated": true,
+   "calibration": {
+    "observation_joints_deg": [
+     3.077311848471626,
+     -33.2225455569406,
+     -78.57937979708325,
+     187.79215802167369,
+     -94.99998784487263,
+     -190.81306872930028
+    ],
+    "yaw_correction_deg": -2.1851499493326307,
+    "camera_pose_world": {
+     "x": 193.0585142880583,
+     "y": 78.36569649687358,
+     "z": 627.6127654955956,
+     "oX": 0.2779852707767284,
+     "oY": 0.15020383787343636,
+     "oZ": -0.9487692007644852,
+     "theta": -77.33488321357177
+    },
+    "camera_intrinsics": {
+     "widthPx": 1280,
+     "heightPx": 720,
+     "focalXPx": 920.016357421875,
+     "focalYPx": 920.522705078125,
+     "centerXPx": 639.3700561523438,
+     "centerYPx": 364.5325927734375
+    },
+    "xy_offset_mm": [
+     5.896063600863272,
+     1.7899026879848563
+    ],
+    "pickup_tcp_z_mm": 190.30335649278322,
+    "place_tcp_z_mm": 224.31804916394577,
+    "observed_cube_z_mm": 217.41846536661868,
+    "observed_ring_z_mm": 54.9463433360321,
+    "residual_mm": 0.41694977955049195,
+    "scope": "Only this measured observation pose, unchanged camera and same cube/ring/table; relative to original task calibration",
+    "detector_revision": "connected-full-face-v2",
+    "validation": {
+     "accepted": true,
+     "frame_count": 6,
+     "max_withheld_error_mm": 2.379145610117495,
+     "withheld_frame_errors": [
+      {
+       "pickup_mm": 1.242622900022858,
+       "place_mm": 2.379145610117495,
+       "edge_deg": 1.6894614312183123
+      },
+      {
+       "pickup_mm": 1.4084054210188757,
+       "place_mm": 1.364159347500709,
+       "edge_deg": 0.43946143121831227
+      },
+      {
+       "pickup_mm": 0.7613883049216685,
+       "place_mm": 0.5599494075433907,
+       "edge_deg": 0.43946143121831227
+      }
+     ],
+     "reference_capture_time": "2026-10-16T20:42:44.954Z",
+     "captured_at": "2026-10-16T20:42:51.225Z",
+     "limitation": "Cross-view consistency against original taught-contact task calibration, not independent absolute hand-eye metrology."
+    }
+   }
+  },
+  {
+   "id": "pan_right8",
+   "validated": true,
+   "calibration": {
+    "observation_joints_deg": [
+     -12.84635468719609,
+     -33.2225455569406,
+     -78.57937979708325,
+     187.79215802167369,
+     -94.99998784487263,
+     -190.81306872930028
+    ],
+    "yaw_correction_deg": -2.001536088616037,
+    "camera_pose_world": {
+     "x": 207.15062014274406,
+     "y": 22.39180432723422,
+     "z": 627.6127654955958,
+     "oX": 0.30852783028090747,
+     "oY": 0.06817317377734433,
+     "oZ": -0.9487692007644856,
+     "theta": -77.33488321357174
+    },
+    "camera_intrinsics": {
+     "widthPx": 1280,
+     "heightPx": 720,
+     "focalXPx": 920.016357421875,
+     "focalYPx": 920.522705078125,
+     "centerXPx": 639.3700561523438,
+     "centerYPx": 364.5325927734375
+    },
+    "xy_offset_mm": [
+     4.912363953677186,
+     6.433821277316689
+    ],
+    "pickup_tcp_z_mm": 190.30335649278322,
+    "place_tcp_z_mm": 224.31804916394577,
+    "observed_cube_z_mm": 217.71939502326094,
+    "observed_ring_z_mm": 55.49824034572737,
+    "residual_mm": 0.5374840214626293,
+    "scope": "Only this measured observation pose, unchanged camera and same cube/ring/table; relative to original task calibration",
+    "detector_revision": "connected-full-face-v2",
+    "validation": {
+     "accepted": true,
+     "frame_count": 6,
+     "max_withheld_error_mm": 1.9754789247912514,
+     "withheld_frame_errors": [
+      {
+       "pickup_mm": 1.9754789247912514,
+       "place_mm": 0.3869959938949383,
+       "edge_deg": 0.6230752919349101
+      },
+      {
+       "pickup_mm": 0.8493569757244532,
+       "place_mm": 0.8721974718092252,
+       "edge_deg": 1.87307529193491
+      },
+      {
+       "pickup_mm": 0.9397931082912608,
+       "place_mm": 0.6165944830158134,
+       "edge_deg": 0.37307529193491007
+      }
+     ],
+     "reference_capture_time": "2026-10-16T20:42:44.954Z",
+     "captured_at": "2026-10-16T20:43:06.136Z",
+     "limitation": "Cross-view consistency against original taught-contact task calibration, not independent absolute hand-eye metrology."
+    }
+   }
+  }
+ ],
+ "grasp_retry_count": 3,
+ "default_goal": "box",
+ "require_all_targets": true,
+ "box_execution_enabled": false,
+ "box_inner_dimensions_mm": {
+  "length_mm": 292,
+  "width_mm": 216,
+  "depth_mm": 191
+ },
+ "camera_mount_reference": {
+  "x": -73,
+  "y": 40,
+  "z": 18,
+  "oX": 0,
+  "oY": 0,
+  "oZ": 1,
+  "theta": -90
+ },
+ "box_depth_diagnostic": {
+  "camera_resource": "cam",
+  "serial_number": "830112070508",
+  "method": "Observed four wall planes and inside floor, nine stationary RGB-D frames; manually inspected pixel ROI",
+  "no_motion_approval": true,
+  "errors": [],
+  "median_length_width_depth_mm": [
+   262.8193061541747,
+   211.90325974887162,
+   125.35081243125963
+  ],
+  "frame_min_mm": [
+   262.5134978279223,
+   211.61868891382346,
+   124.8046934221423
+  ],
+  "frame_max_mm": [
+   263.289313414005,
+   212.05471288613796,
+   126.0590170490668
+  ],
+  "limitation": "Temporal spread is repeatability, not absolute accuracy. Wall-face ambiguity, depth calibration and flexible cardboard remain. No insertion calibration certified."
+ },
+ "surveyed_box": {
+  "box": {
+   "folder": "20261016T232737Z",
+   "frame": 5,
+   "identity": "orange_postit_box",
+   "floor_center_world_mm": [
+    298.21765274582395,
+    -143.14392804022765,
+    0.8515096458647804
+   ],
+   "inner_dimensions_mm": [
+    261.42119597346306,
+    206.55619823246064
+   ],
+   "world_yaw_deg": -4.93263579539594,
+   "rim_z_mm": 129.99776389646297,
+   "cavity_depth_mm": 129.1462542505982,
+   "floor_normal_world": [
+    -0.0015020861186042912,
+    -0.009684069851698708,
+    0.9999519801112449
+   ],
+   "floor_samples": 109408,
+   "marker_count": 3,
+   "measurement_margin_mm": 0,
+   "wall_support": [
+    1387,
+    1377,
+    1396,
+    969
+   ],
+   "wall_rms_mm": [
+    1.1196375583232439,
+    1.1624547580740154,
+    1.2335314753918831,
+    1.2283134405957143
+   ],
+   "wall_planes": [
+    {
+     "normal": [
+      0.995004323115862,
+      -0.08553021953135033,
+      0.05148765412858147
+     ],
+     "offset": 178.3690525519329
+    },
+    {
+     "normal": [
+      -0.9974863117201462,
+      0.07075494409651675,
+      -0.0038465330933954156
+     ],
+     "offset": -440.0779095053695
+    },
+    {
+     "normal": [
+      0.08621514679708006,
+      0.9958274371084057,
+      0.029910933868106296
+     ],
+     "offset": -220.4711022794636
+    },
+    {
+     "normal": [
+      0.07110522016297381,
+      0.9973124431200722,
+      -0.01766177973612409
+     ],
+     "offset": -17.021459339109246
+    }
+   ],
+   "opening_corners_world_mm": [
+    [
+     158.70641584724098,
+     -235.3264372139392,
+     135.49797688743996
+    ],
+    [
+     419.15334775182345,
+     -257.8749929478564,
+     135.49797688743996
+    ],
+    [
+     436.96959226362446,
+     -52.08858800393571,
+     135.49797688743996
+    ],
+    [
+     176.52266035904205,
+     -29.54003227001857,
+     135.49797688743996
+    ]
+   ],
+   "scope": "Common opening over measured wall height; no dimensions substituted",
+   "vertical_reference": {
+    "source": "Operator taught contact with cube resting in this unchanged box",
+    "offset_mm": -5.50021299097699,
+    "scope": "Same box on same tabletop; full insertion not yet physically verified"
+   },
+   "placement_center_xy_mm": [
+    298.381023162077,
+    -141.2509647265067
+   ]
+  },
+  "baseline": {
+   "folder": "20261016T232737Z",
+   "frame": 3,
+   "identity": "orange_postit_box",
+   "floor_center_world_mm": [
+    312.25789436614673,
+    -151.8155928955636,
+    6.267541538654189
+   ],
+   "inner_dimensions_mm": [
+    261.5099977576392,
+    208.24147107455732
+   ],
+   "world_yaw_deg": -1.7899206229929852,
+   "rim_z_mm": 135.02396737071277,
+   "cavity_depth_mm": 128.75642583205857,
+   "floor_normal_world": [
+    -0.00274609115021057,
+    -0.006745355702632128,
+    0.9999734792282442
+   ],
+   "floor_samples": 115008,
+   "marker_count": 1,
+   "measurement_margin_mm": 0,
+   "wall_support": [
+    1424,
+    1465,
+    1354,
+    1045
+   ],
+   "wall_rms_mm": [
+    1.1224779563032352,
+    1.1042857841411673,
+    1.2123852046585595,
+    1.1827323206346725
+   ],
+   "wall_planes": [
+    {
+     "normal": [
+      0.9976995434747606,
+      -0.04758986906110022,
+      0.048278621697408784
+     ],
+     "offset": 186.77242439769313
+    },
+    {
+     "normal": [
+      0.9994552943890325,
+      -0.03123315281535711,
+      -0.010658549758062998
+     ],
+     "offset": 447.5106383282394
+    },
+    {
+     "normal": [
+      0.044677944481927946,
+      0.9988224982265493,
+      0.018907625798729576
+     ],
+     "offset": -243.42035805663585
+    },
+    {
+     "normal": [
+      0.030780002540702036,
+      0.9994298522958875,
+      -0.013876663266588275
+     ],
+     "offset": -38.03439048318631
+    }
+   ],
+   "opening_corners_world_mm": [
+    [
+     178.31449110956865,
+     -251.80140201200643,
+     135.02396737071277
+    ],
+    [
+     439.69689045810776,
+     -259.9696477233748,
+     135.02396737071277
+    ],
+    [
+     446.20129762272484,
+     -51.829783779120774,
+     135.02396737071277
+    ],
+    [
+     184.81889827418576,
+     -43.66153806775242,
+     135.02396737071277
+    ]
+   ],
+   "scope": "Common opening over measured wall height; no dimensions substituted"
+  },
+  "task_map": [
+   [
+    0.9994890211588452,
+    0.03131055029285797,
+    -0.006430087347117697,
+    8.834660644102712
+   ],
+   [
+    -0.031349373490887955,
+    0.9994903077529317,
+    -0.00602839030575901,
+    16.02583834200852
+   ],
+   [
+    0.006238057763595262,
+    0.006226889135690458,
+    0.9999611554890668,
+    -32.22394296818936
+   ],
+   [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  ],
+  "measured_camera_mount": {
+   "x": -73.14371655048066,
+   "y": 30.85638286493701,
+   "z": 15.852006251068667,
+   "o_x": 0.006662378662586714,
+   "o_y": -0.006921468528449398,
+   "o_z": 0.9999538519271607,
+   "theta": -89.75432996479338
+  },
+  "overview_joints_deg": [
+   -4.8845214193622315,
+   -33.2225455569406,
+   -78.57937979708325,
+   187.79215802167369,
+   -94.99998784487263,
+   -190.81306872930028
+  ],
+  "view_tcp_world": {
+   "x": 161.2471484042407,
+   "y": -37.42597171679321,
+   "z": 506.1789902480728,
+   "o_x": 0.31256413067489985,
+   "o_y": -0.1729873939250894,
+   "o_z": -0.9340123263418154,
+   "theta": -26.45514678811507
+  },
+  "scope": "Reuse accepted aperture and taught height; track only XY/yaw at calibrated box view; redetect cube every cycle",
+  "view_joints_deg": [
+   0.0,
+   -35.0,
+   -78.57937979708325,
+   170.0,
+   -95.0,
+   -180.0
+  ]
+ },
+ "surveyed_box_enabled": true,
+ "taught_seating_reference": {
+  "source_record": "seated-grasp/20261017T003748Z/record.json",
+  "purpose": "Operator-taught seated height reference for the next fresh visual pickup after manual reset.",
+  "seated_tcp_world_z_mm": 191.43148161369567,
+  "holding_confirmed_samples": 5,
+  "operator_confirmed_cube_supported": true,
+  "operator_reported_tool_off_center": true,
+  "taught_tilt_from_down_deg": 5.0949295302586535,
+  "z_relative_to_previous_nominal_mm": 1.1281251209124434,
+  "compression_note": "No matching first-contact pose was captured for this manually repositioned and tilted grasp. Its final Z is 1.128 mm above the previous nominal pose; this is not evidence of a measured downward stroke or an increased safe compression allowance.",
+  "reuse": "Preserve the measured seated height as a calibration reference. Re-detect cube position and orientation after reset; do not reuse the off-center manual grasp transform for placement.",
+  "box_remeasured": false,
+  "motion_commanded": false,
+  "live_settings_changed": false
+ },
+ "cached_box_reset_reference": {
+  "pickup": {
+   "x": 348.0117721816955,
+   "y": 245.03926522232706,
+   "z": 190.30335649278322,
+   "o_x": 0.0,
+   "o_y": 0.0,
+   "o_z": -1.0,
+   "theta": 38.62461138055096
+  },
+  "observation": {
+   "cube_count": 1,
+   "ring_count": 1,
+   "box_count": 0,
+   "issues": [
+    "Depth/world tabletop differs from configured table by more than 15 mm; camera calibration needs verification"
+   ],
+   "camera_pose_world": {
+    "x": 202.05268393031048,
+    "y": 50.86768599935613,
+    "z": 627.6112755228306,
+    "oX": 0.2961119325741179,
+    "oY": 0.11021596548042739,
+    "oZ": -0.948772978293774,
+    "theta": -77.33952355163966
+   },
+   "camera_intrinsics": {
+    "widthPx": 1280,
+    "heightPx": 720,
+    "focalXPx": 920.016357421875,
+    "focalYPx": 920.522705078125,
+    "centerXPx": 639.3700561523438,
+    "centerYPx": 364.5325927734375
+   },
+   "nominal_cube_size_mm": 200,
+   "observed_table_z_mm": 28.96185584197849,
+   "table_reference_error_mm": 51.96185584197849,
+   "cube": {
+    "top_center_world_mm": [
+     321.7145391094899,
+     262.3760312483395,
+     218.06590855583767
+    ],
+    "world_yaw_deg": -36.5,
+    "top_dimensions_mm": [
+     161.50340097869213,
+     168.85375660935907
+    ],
+    "observed_height_mm": 188.8321615020126,
+    "top_normal_world": [
+     -0.015818027233889868,
+     -0.029179724759015202,
+     0.9994490150464985
+    ],
+    "pixel_hint": [
+     333,
+     376
+    ]
+   },
+   "ring": {
+    "top_center_world_mm": [
+     510.7232061401741,
+     118.86135346617235,
+     58.553584737672736
+    ],
+    "height_mm": 29.385517256037872,
+    "bounding_diameter_mm": 232.84625953770274,
+    "pixel_hint": [
+     664,
+     186
+    ]
+   },
+   "boxes": [],
+   "capture_time": "2026-10-17T00:14:15.526Z",
+   "observation_joints_deg": [
+    -4.884027084421052,
+    -33.22272655695361,
+    -78.57937979708325,
+    187.7903548517328,
+    -94.99998784487263,
+    -190.8119758990331
+   ],
+   "detection_quality": {
+    "frames": 5,
+    "agreeing_frames": 5,
+    "max_inlier_center_deviation_mm": 2.039226385625685,
+    "max_inlier_edge_deviation_deg": 1.25
+   }
+  },
+  "world_yaw_deg": -38.624611380550945
+ }
+}

@@ -1,0 +1,15 @@
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+dist/
+build/
+*.spec
+*.log
+.env
+api-key.json
+viam.json
+credentials/
+pickplace-module/tools/last-build.json
+pickplace-module/tools/config-before-*.json
