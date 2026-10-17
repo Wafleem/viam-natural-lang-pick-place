@@ -268,7 +268,7 @@ class PickPlaceCycle:
                     continue
                 path = await planner.segment(await self.joints(), world, goal_deg=q, margin=1.0)
                 await self.execute(f'sweep_{off[0]:+g}_{off[1]:+g}', path, s.sweep_speed_deg_s)
-                await asyncio.sleep(.6)
+                await asyncio.sleep(.3)
                 hits = []
                 cam_shift = np.array(pose_matrix(await self.pose(s.camera, 'world')))[:2, 3]-np.array(pose_matrix(cal['camera_pose_world']))[:2, 3]
                 # A sweep view is the overview camera translated (same orientation), so a point seen
@@ -300,10 +300,13 @@ class PickPlaceCycle:
             if found is None:
                 raise CycleError('Cube not found in the overview or the sweep views: '+json.dumps(tried))
         finally:
-            back = await planner.segment(await self.joints(), world, goal_deg=s.overview_joints_deg, margin=1.0)
-            if len(back) > 1 and max(abs(x-y) for x, y in zip(back[0], back[-1])) > .1:
-                await self.execute('sweep_return', back, s.sweep_speed_deg_s)
-            await asyncio.sleep(.6)
+            # Found: stay here. The arm is right above the cube, and the observation is already
+            # expressed as if seen from the overview, so the cycle plans its approach from this
+            # view (saves the trip back and most of the approach). Not found: back to the overview.
+            if found is None:
+                back = await planner.segment(await self.joints(), world, goal_deg=s.overview_joints_deg, margin=1.0)
+                if len(back) > 1 and max(abs(x-y) for x, y in zip(back[0], back[-1])) > .1:
+                    await self.execute('sweep_return', back, s.sweep_speed_deg_s)
         xy, yaw, cube, corr, off, cube_z = found
         obs = copy.deepcopy(ref)
         obs['camera_pose_world'], obs['camera_intrinsics'] = cal['camera_pose_world'], cal['camera_intrinsics']
@@ -694,6 +697,7 @@ class PickPlaceCycle:
         try:
             await self.go_to_overview(Planner(self.motion, self.s, self.kin))
             obs = await self.detect('box', select)
+            await self.go_to_overview(Planner(self.motion, self.s, self.kin))  # a sweep stops over the cube; park
             from .calibration import calibrated_xy
             cube = obs.get('sweep', {}).get('cube_tool_xy_mm') or calibrated_xy(self.s.calibration, obs['cube']['top_center_world_mm']).tolist()
             out = {'cube_xy_mm': [round(float(v), 1) for v in cube],
@@ -799,6 +803,8 @@ class PickPlaceCycle:
                 await self.acquire_lease()
             try:
                 await self.detect(goal, select, allow_sweep)
+                if max(abs(a-b) for a, b in zip(await self.joints(), self.s.overview_joints_deg)) > .25:
+                    await self.go_to_overview(Planner(self.motion, self.s, self.kin))  # park after a sweep
             finally:
                 await self.release_lease()
         else:

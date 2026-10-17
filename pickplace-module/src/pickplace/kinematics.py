@@ -118,17 +118,21 @@ class ArmKinematics:
         goal = np.array(pose_matrix(target)) if isinstance(target, dict) else np.asarray(target, float)
         seed = [float(v) for v in seed_deg]
         yaw = math.degrees(math.atan2(goal[1, 3], goal[0, 3]))
-        seeds = [seed, [seed[0], seed[1], seed[2], seed[3]-180, -seed[4], seed[5]+180]]
-        for j4, j5 in ((0, 90), (180, -90), (0, 45), (180, -45)):
-            for j2, j3 in ((0, -90), (20, -120), (-20, -60)):
-                seeds.append([yaw, j2, j3, j4, j5, seed[5]])
+        primary = [seed, [seed[0], seed[1], seed[2], seed[3]-180, -seed[4], seed[5]+180]]  # both wrist branches
+        fallback = [[yaw, j2, j3, j4, j5, seed[5]] for j4, j5 in ((0, 90), (180, -90), (0, 45), (180, -45))
+                    for j2, j3 in ((0, -90), (20, -120), (-20, -60))]
         solutions = []
-        for start in seeds:
-            q = self._solve(goal, start, margin_deg, tolerance_mm, tolerance_deg)
-            if q is not None:
-                q = self._normalize(q, seed, margin_deg)
+        # The two seeds near the start almost always converge; the 12 generic seeds (most of the
+        # cost) are tried only when neither does.
+        for seeds in (primary, fallback):
+            for start in seeds:
+                q = self._solve(goal, start, margin_deg, tolerance_mm, tolerance_deg)
                 if q is not None:
-                    solutions.append(q)
+                    q = self._normalize(q, seed, margin_deg)
+                    if q is not None:
+                        solutions.append(q)
+            if solutions:
+                break
         if not solutions:
             raise ValueError(f'No IK solution keeps {margin_deg:g} deg from every joint limit')
         self.last_solutions = solutions
