@@ -84,10 +84,10 @@
   "suction_dwell_s": 3.0,
   "release_dwell_s": 1.0,
   "clearance_mm": 100,
-  "travel_speed_deg_s": 30,
-  "approach_speed_deg_s": 15,
+  "travel_speed_deg_s": 75,
+  "approach_speed_deg_s": 37.5,
   "press_speed_deg_s": 1,
-  "acceleration_deg_s2": 37.5,
+  "acceleration_deg_s2": 94,
   "joint_limit_margin_deg": 5,
   "lease_service": "code-1",
   "boxes": [
@@ -128,7 +128,7 @@
     "height_mm": 25
   },
   "pick_retries": 3,
-  "sweep_speed_deg_s": 30,
+  "sweep_speed_deg_s": 75,
   "carry_clearance_mm": 50,
   "workcell_obstacles": [
     {

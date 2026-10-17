@@ -175,12 +175,15 @@ def compute_targets(settings, observation, goal, kinematics, start_joints_deg, s
         if side is not None:  # horizontal entry: release and pre-insert from the side geometry
             for place_yaw, release, above in side_releases(s, side, grasp):
                 try:
-                    _, q = side_slide_joints(kinematics, release, above, margin)
+                    _, q = side_slide_joints(kinematics, release, above, margin, step_mm=25)
                 except ValueError:
                     continue
                 cost = pick_cost+3*_travel(q, q_p)
                 if best is None or cost < best[0]:
                     best = (cost, (yaw, contact, above_p, q_p, grasp), (place_yaw, release, above, q))
+                break  # the first roll that slides in cleanly is good enough
+            if best is not None:
+                break  # cheapest pick first: stop once it has a clean slide
             continue
         for k in range(4):
             place_yaw = place_base_yaw+90*k
