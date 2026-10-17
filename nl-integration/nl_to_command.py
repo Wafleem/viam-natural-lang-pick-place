@@ -86,15 +86,17 @@ def _parse(text, describe):
     if any(w in words for w in ('release', 'drop', 'let')) and 'go' in words or 'suction off' in low:
         return {'command': {'action': 'release'}, 'moves': False, 'explanation': 'Switch suction off'}
 
-    if 'cube' not in words and not any(w in words for w in ('block', 'it', 'object')):
-        raise ValueError('I only know how to move the cube; try "put the cube in the box"')
+    goals = describe['place']['goals']
+    generic = {'box', 'bin', 'container', 'basket'}
+    # There is one cube, so naming only where it goes ("box", "the ring please") is enough.
+    place_words = set(RING_WORDS) | generic | {g['name'].lower() for g in goals} | {g.get('color') for g in goals if g.get('color')}
+    if 'cube' not in words and not any(w in words for w in ('block', 'it', 'object')) and not place_words & set(words):
+        raise ValueError('I only know how to move the cube to the ring or the box; try "put the cube in the box"')
     select = next((SELECT_WORDS[w] for w in words if w in SELECT_WORDS), None)
     index = next((ORDINALS[w] for w in words if w in ORDINALS), None)
     pick = {'object': 'cube', 'select': {'index': index} if index is not None else (select or 'only')}
 
-    goals = describe['place']['goals']
     place = None
-    generic = {'box', 'bin', 'container', 'basket'}
     for g in goals:  # specific box names first ("box2", "blue_box"); plain "box" is not a name
         if g['type'] == 'box' and g['name'].lower() not in generic and g['name'].lower() in words:
             place = {'goal': g['name']}
@@ -115,8 +117,10 @@ def _parse(text, describe):
     check = any(p in low for p in CHECK_WORDS)
     action = 'dry_run' if check else 'pick_place'
     target = place.get('goal') or place.get('color', '') + (' box' if 'color' in place else place.get('type', ''))
+    sel = pick['select']
+    which = '' if sel == 'only' else f'{sel} ' if isinstance(sel, str) else f'#{index + 1} '
     return {'command': {'action': action, 'pick': pick, 'place': place}, 'moves': action in MOVES,
-            'explanation': f"{'Plan (no motion)' if check else 'Pick'} the {pick['select'] if isinstance(pick['select'], str) else 'cube #'+str(index+1)} cube -> {target}"}
+            'explanation': f"{'Plan (no motion)' if check else 'Pick'} the {which}cube -> {target}"}
 
 
 def validate(command, describe=DESCRIBE):
