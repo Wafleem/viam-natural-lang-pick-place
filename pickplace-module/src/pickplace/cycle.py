@@ -132,8 +132,11 @@ class PickPlaceCycle:
     # ---- suction (open loop) ---------------------------------------------
     async def suction_on(self):
         self.event('suction_on')
-        if await self.gripper.grab(timeout=5) is False:
-            raise CycleError('Vacuum gripper rejected the Grab command')
+        # Open loop: Grab's bool mirrors the unreliable holding sensor (false in the air), so it
+        # never gates the press. Only an exception means the command itself failed.
+        reply = await self.gripper.grab(timeout=5)
+        if reply is False:
+            self.event('grab_reported_not_holding', note='ignored: open-loop suction')
 
     async def suction_off(self, dwell=True):
         self.event('suction_off')
@@ -159,7 +162,7 @@ class PickPlaceCycle:
             raise CycleError('Could not decode the color image')
         if max(abs(a-b) for a, b in zip(q0, await self.joints())) > .05:
             raise CycleError('Arm moved during camera capture')
-        attrs = {'cube_size_mm': self.s.cube_size_mm, 'table_z_mm': self.s.table_z_mm}
+        attrs = {'cube_size_mm': self.s.cube_size_mm, 'table_z_mm': self.s.table_z_mm, 'object': self.s.vision_object}
         depth_mm = decode_depth(depth.data)
         obs = await asyncio.to_thread(analyze, bgr, depth_mm, props, pose, attrs, require_ring, select, require_cube)
         obs.update(capture_time=stamp, observation_joints_deg=q0)
@@ -202,7 +205,7 @@ class PickPlaceCycle:
             return await self.detect_at_overview(goal, select)
         except CycleError as e:
             text = str(e)
-            if not any(k in text for k in ('No cube in view', 'clipped', 'Cube top surface', 'Need exactly one full cube',
+            if not any(k in text for k in ('No cube in view', 'No phone in view', 'clipped', 'Cube top surface', 'Need exactly one full cube',
                                          'Surface tilt', 'No horizontal surface')):
                 raise
             self.event('cube_not_in_overview', reason=text[:120])
@@ -452,6 +455,44 @@ class PickPlaceCycle:
         obs.pop('cube', None)
         return obs
 
+    async def cube_held_after_lift(self, cube_top_z):
+        """Camera stands in for the unreliable suction sensor right after the lift.
+
+        The wrist camera looks straight down past the cups. A held cube's top face sits just
+        below the cups, so a patch between the cups and the camera axis (inside the face for
+        any centred grip) reads very near or invalid (closer than the camera's minimum range).
+        A dropped cube leaves that patch looking down at the cube/table near `cube_top_z`.
+        Returns {'held': True/False/None, ...}; None means the check could not decide."""
+        try:
+            await asyncio.sleep(.3)
+            props = MessageToDict(await self.read(lambda: self.camera.get_properties(timeout=5)))
+            I = props['intrinsicParameters']
+            cam = np.array(pose_matrix(await self.pose(self.s.camera, 'world')))
+            tcp = np.array(pose_matrix(await self.pose(self.s.gripper, 'world')))[:3, 3]
+            images, _ = await self.camera.get_images(timeout=10)
+            raw = next(i for i in images if i.mime_type == 'image/vnd.viam.dep')
+            depth = decode_depth(raw.data).astype(float)
+            toward = cam[:2, 3]-tcp[:2]  # a point on the held object's top face, toward the camera
+            reach = min(.5*np.linalg.norm(toward), .3*min(self.s.object_footprint_mm))
+            mid = np.r_[tcp[:2]+toward/max(np.linalg.norm(toward), 1e-6)*reach, tcp[2]]
+            c = np.linalg.inv(cam) @ np.r_[mid, 1]
+            u = int(round(I['focalXPx']*c[0]/c[2]+I['centerXPx']))
+            v = int(round(I['focalYPx']*c[1]/c[2]+I['centerYPx']))
+            h, w = depth.shape
+            if c[2] <= 0 or not (20 <= u < w-20 and 20 <= v < h-20):
+                return {'held': None, 'detail': 'hold-check patch outside the image'}
+            patch = depth[v-15:v+16, u-15:u+16]
+            near = cam[2, 3]-tcp[2]  # camera to the held cube's top
+            far = cam[2, 3]-cube_top_z  # camera to a cube that stayed on the table
+            if far-near < 40:
+                return {'held': None, 'detail': 'lift too small to tell held from dropped'}
+            threshold = (near+far)/2
+            near_fraction = float(np.mean((patch <= 0) | (patch < threshold)))
+            return {'held': near_fraction > .5, 'near_fraction': round(near_fraction, 2),
+                    'median_depth_mm': round(float(np.median(patch)), 1), 'threshold_mm': round(threshold, 1)}
+        except Exception as e:
+            return {'held': None, 'detail': f'hold check failed: {e}'}
+
     async def run(self, goal, select='only', source='auto'):
         """One full cycle to `goal`. The cube comes from vision when it is on the table, or from
         the remembered placement when it sits in a box or on the ring (source='auto').
@@ -472,15 +513,29 @@ class PickPlaceCycle:
                     raise CycleError('Ring goal needs the ring in view from the overview')
             if remembered is not None and remembered['place'] == goal:
                 raise CycleError(f'The cube is already at {goal}')
-            plans = dict((name, (path, speed)) for name, path, speed in await self.plan(goal, source=remembered))
-            for name in ('approach', 'descend'):
-                await self.execute(name, *plans[name])
-            touched = True  # from here on a failure may leave the cube anywhere along the path
-            await self.suction_on()
-            await self.execute('press', *plans['press'])
-            self.event('suction_dwell', seconds=self.s.suction_dwell_s)
-            await asyncio.sleep(self.s.suction_dwell_s)
-            for name in ('lift', 'transfer', 'place'):
+            for attempt in range(1, self.s.pick_retries+2):
+                plans = dict((name, (path, speed)) for name, path, speed in await self.plan(goal, source=remembered))
+                for name in ('approach', 'descend'):
+                    await self.execute(name, *plans[name])
+                touched = True  # from here on a failure may leave the cube anywhere along the path
+                await self.suction_on()
+                await self.execute('press', *plans['press'])
+                self.event('suction_dwell', seconds=self.s.suction_dwell_s)
+                await asyncio.sleep(self.s.suction_dwell_s)
+                await self.execute('lift', *plans['lift'])
+                check = await self.cube_held_after_lift(self.targets['contact']['z'])
+                self.event('hold_check', attempt=attempt, **check)
+                if check['held'] is not False:
+                    break
+                if attempt > self.s.pick_retries:
+                    raise CycleError(f'Cube dropped after the lift on all {attempt} attempts')
+                self.event('retrying_pick', attempt=attempt+1)
+                await self.go_to_overview(Planner(self.motion, self.s, self.kin))  # suction off first
+                if remembered is None or remembered['place'] in ('table', 'home'):
+                    remembered = None
+                    await self.detect(goal, select)  # find where it fell (sweeping if needed)
+                # from a box/ring it fell back into the same place: re-pick from memory
+            for name in ('transfer', 'place'):
                 await self.execute(name, *plans[name])
             await self.suction_off()
             for name in ('retract', 'return'):
@@ -557,7 +612,7 @@ class PickPlaceCycle:
         from .grasp_geometry import describe_grasp
         from .vision_geometry import downward_pose
         size = self.s.cube_size_mm
-        G = describe_grasp(top, downward_pose(top, yaw), yaw, [size, size])['tcp_in_cube']  # cup at the face centre
+        G = describe_grasp(top, downward_pose(top, yaw), yaw, list(self.s.object_footprint_mm))['tcp_in_cube']  # cup at the face centre
         return self.memory.set(place, top.tolist(), float(yaw), G, how='set by operator (assumed seated at the goal)')
 
     async def reset(self):

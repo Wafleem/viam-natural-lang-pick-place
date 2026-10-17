@@ -109,7 +109,12 @@ def make_cycle(settings, kin, urdf, joints):
         ('cam', 'arm'): lambda: pif('arm', settings.camera_mount_reference),
         ('cam', 'world'): lambda: pif('world', camera.meta['camera_pose_world']),
     }
-    return PickPlaceCycle(settings, arm, gripper, camera, motion, lease), arm, gripper, motion, lease
+    cycle = PickPlaceCycle(settings, arm, gripper, camera, motion, lease)
+
+    async def undecided(cube_top_z):  # the fake camera never shows a held cube; tests opt in to drops
+        return {'held': None, 'detail': 'fake camera'}
+    cycle.cube_held_after_lift = undecided
+    return cycle, arm, gripper, motion, lease
 
 
 @pytest.mark.parametrize('goal', ['box', 'ring'])

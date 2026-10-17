@@ -50,8 +50,9 @@ def scene_world(settings, observation, targets, cube_state, goal):
     pad = 0.0 if in_box else 10.0
     obstacles = []
     # Tabletop patch around both ends; its top is the table (taught contact - cube size).
-    low = np.minimum(cube_top[:2], goal_top[:2])-size*.7
-    high = np.maximum(cube_top[:2], goal_top[:2])+size*.7
+    length, width = s.object_footprint_mm
+    low = np.minimum(cube_top[:2], goal_top[:2])-length*.7
+    high = np.maximum(cube_top[:2], goal_top[:2])+length*.7
     table_top = s.calibration['pickup_tcp_z_mm']-size
     obstacles.append(prism(TABLE, [*(low+high)/2, table_top-100], [*(high-low), 200]))
     ring = observation.get('ring')
@@ -73,11 +74,13 @@ def scene_world(settings, observation, targets, cube_state, goal):
         offset = np.array([contact['x']-cube_top[0], contact['y']-cube_top[1], 0.0])
         local = np.array(pose_matrix(contact))[:3, :3].T @ (-offset)
         press = s.press_depth_mm
-        cube = prism(CUBE, [local[0], local[1], (size-press)/2], [size+pad, size+pad, size+press])
+        held = np.linalg.inv(np.array(targets['grasp']['tcp_in_cube']))  # object frame in the tool frame
+        local_yaw = math.degrees(math.atan2(held[1, 0], held[0, 0]))
+        cube = prism(CUBE, [local[0], local[1], (size-press)/2], [length+pad, width+pad, size+press], local_yaw)
         observer = PoseInFrame(reference_frame=s.gripper, pose=Pose(o_z=1))
     else:
         top, yaw = (cube_top, targets['cube_yaw_deg']) if cube_state == 'at_pick' else (goal_top, targets['place_yaw_deg'])
-        cube = prism(CUBE, [top[0], top[1], top[2]-size/2], [size+pad, size+pad, size], yaw)
+        cube = prism(CUBE, [top[0], top[1], top[2]-size/2], [length+pad, width+pad, size], yaw)
         observer = PoseInFrame(reference_frame='world', pose=Pose(o_z=1))
     return WorldState(obstacles=[GeometriesInFrame(reference_frame='world', geometries=obstacles)],
                       transforms=[Transform(reference_frame=CUBE, pose_in_observer_frame=observer, physical_object=cube)])
@@ -104,7 +107,8 @@ def other_cubes(settings, observation):
         xy = calibrated_xy(settings.calibration, c['top_center_world_mm'])
         yaw = c['world_yaw_deg']+settings.calibration['yaw_correction_deg']
         top = settings.calibration['pickup_tcp_z_mm']
-        result.append(prism(f'other-cube-{i}', [*xy, top-size/2], [size+10, size+10, size], yaw))
+        length, width = settings.object_footprint_mm
+        result.append(prism(f'other-cube-{i}', [*xy, top-size/2], [length+10, width+10, size], yaw))
     return result
 
 

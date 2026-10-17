@@ -10,7 +10,7 @@ import math
 import numpy as np
 
 from .box import check_cube_fits, placement_xy
-from .calibration import cube_target, ring_target
+from .calibration import calibrated_direction, cube_target, ring_target
 from .grasp_geometry import describe_grasp, place_tcp
 from .transforms import pose_matrix
 from .vision_geometry import downward_pose
@@ -33,6 +33,35 @@ def grasp_offset(observation, calibration, yaw, amount):
     u, v = np.array([math.cos(a), math.sin(a)]), np.array([-math.sin(a), math.cos(a)])
     edge = max([u, -u, v, -v], key=lambda axis: float(axis @ up))
     return np.array([*(edge*amount), 0.])
+
+
+def tool_yaw_aligning(axis_tool_deg, world_deg):
+    """Tool-down yaw (downward_pose theta) that points the tool-frame direction axis_tool_deg
+    along world_deg. Solved from two evaluations; the map is affine with slope +/-1."""
+    def world_angle(t):
+        R = np.array(pose_matrix(downward_pose(np.zeros(3), t)))[:3, :3]
+        a = math.radians(axis_tool_deg)
+        v = R @ np.array([math.cos(a), math.sin(a), 0.])
+        return math.degrees(math.atan2(v[1], v[0]))
+    a0 = world_angle(0.0)
+    slope = 1.0 if abs(((world_angle(90.0)-a0)-90+180) % 360-180) < 1 else -1.0
+    t = (world_deg-a0)/slope
+    return (t+180) % 360-180
+
+
+def phone_candidates(settings, observation, top, yaw):
+    """(object yaw, contact TCP, grasp) for both 180 deg turns of a phone: cups along its length,
+    the cup centre shifted grip_away_from_bump_mm away from the camera bump (if seen)."""
+    s, phone = settings, observation['cube']
+    offset = np.zeros(3)
+    if phone.get('bump_world_xy') and s.grip_away_from_bump_mm:
+        offset[:2] = -calibrated_direction(s.calibration, phone['bump_world_xy'])*s.grip_away_from_bump_mm
+    result = []
+    for k in range(2):
+        obj_yaw = yaw+180*k
+        contact = downward_pose(top+offset, tool_yaw_aligning(s.cup_axis_tool_deg, obj_yaw))
+        result.append((obj_yaw, contact, describe_grasp(top, contact, obj_yaw, phone['top_dimensions_mm'])))
+    return result
 
 
 def _travel(a, b):
@@ -65,10 +94,10 @@ def compute_targets(settings, observation, goal, kinematics, start_joints_deg, s
     s, cal, margin = settings, settings.calibration, settings.joint_limit_margin_deg
     size = s.cube_size_mm
     if source is None:
-        cube_top, detected_yaw = cube_target(observation, cal)
+        cube_top, detected_yaw = cube_target(observation, cal, s.yaw_step_deg)
         source_place = 'table'
-        candidates = []
-        for k in range(4):
+        candidates = phone_candidates(s, observation, cube_top, detected_yaw) if s.object_kind == 'phone' else []
+        for k in range(0 if s.object_kind == 'phone' else 4):
             yaw = detected_yaw+90*k
             offset = grasp_offset(observation, cal, yaw, s.grasp_toward_image_top_mm)
             contact = downward_pose(cube_top+offset, yaw)
@@ -76,9 +105,10 @@ def compute_targets(settings, observation, goal, kinematics, start_joints_deg, s
     else:
         cube_top, source_place = np.asarray(source['top_world_mm'], float), source['place']
         G = {'tcp_in_cube': source['tcp_in_cube']}
-        # The square cube may be re-gripped at any of its four 90 deg turns of the same cup spot.
-        candidates = [(source['yaw_deg']+90*k, place_tcp(cube_top, source['yaw_deg']+90*k, G),
-                       {**copy.deepcopy(source.get('grasp', {})), 'tcp_in_cube': source['tcp_in_cube']}) for k in range(4)]
+        # Re-grip at any symmetric turn of the same cup spot: four for the cube, two for a phone.
+        step = s.yaw_step_deg
+        candidates = [(source['yaw_deg']+step*k, place_tcp(cube_top, source['yaw_deg']+step*k, G),
+                       {**copy.deepcopy(source.get('grasp', {})), 'tcp_in_cube': source['tcp_in_cube']}) for k in range(int(360/step))]
     source_box = s.boxes.get(source_place)
     goal_top, place_base_yaw, box = goal_surface(s, observation, goal)
 
@@ -115,7 +145,7 @@ def compute_targets(settings, observation, goal, kinematics, start_joints_deg, s
     for k in range(4):
         place_yaw = place_base_yaw+90*k
         if box is not None:
-            check_cube_fits(box, size, goal_top, place_yaw)
+            check_cube_fits(box, s.object_footprint_mm, goal_top, place_yaw)
         release = place_tcp(goal_top, place_yaw, grasp)
         release['z'] += s.release_above_goal_mm  # optional drop height (default 0)
         above = {**release, 'z': above_place_z}

@@ -18,11 +18,16 @@ def placement_xy(box):
 
 
 def check_cube_fits(box, cube_size, center_xy, world_yaw):
-    """Cube footprint inside the opening at this position/yaw. Returns per-axis gap (mm)."""
+    """Object footprint inside the opening at this position/yaw. Returns per-axis gap (mm).
+
+    cube_size is the square cube's edge, or [length, width] of a rectangular object whose
+    length lies along world_yaw."""
     dims = np.asarray(box['inner_dimensions_mm'], float)
     delta = (np.asarray(center_xy[:2], float)-np.asarray(box['floor_center_world_mm'][:2], float)) @ _rotation(box['world_yaw_deg'])
     theta = math.radians(world_yaw-box['world_yaw_deg'])
-    extent = cube_size*(abs(math.cos(theta))+abs(math.sin(theta)))
+    length, width = (cube_size, cube_size) if np.isscalar(cube_size) else cube_size
+    c, s = abs(math.cos(theta)), abs(math.sin(theta))
+    extent = np.array([length*c+width*s, length*s+width*c])
     remaining = dims/2-np.abs(delta)-extent/2
     if min(remaining) < 0:
         raise ValueError(f'Cube does not fit the box opening (gaps {remaining.round(1).tolist()} mm)')
