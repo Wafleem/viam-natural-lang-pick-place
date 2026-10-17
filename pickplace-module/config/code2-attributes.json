@@ -127,7 +127,7 @@
   },
   "pick_retries": 3,
   "sweep_speed_deg_s": 20,
-  "carry_clearance_mm": 25,
+  "carry_clearance_mm": 50,
   "workcell_obstacles": [
     {
       "frame": "wall-front",
@@ -161,5 +161,6 @@
         254
       ]
     }
-  ]
+  ],
+  "carry_upright_deg": 15
 }
