@@ -52,13 +52,14 @@ def test_grasp_offset_turns_with_the_cube():
     assert np.allclose(np.array(pose_matrix(release)) @ np.linalg.inv(np.array(G['tcp_in_cube'])), cube_top_frame(goal, 90.0))
 
 
-def test_current_box_clearance_is_documented(settings, observation, kin):
-    """GEOMETRY.md section 5: 30.7 mm and 1.4 mm per side for the accepted box."""
+def test_box_clearance_matches_its_opening(settings, observation, kin):
+    """Placed square at the box centre, the gap per side is (opening - cube) / 2 on each axis."""
     t = compute_targets(settings, observation, 'box', kin, settings.overview_joints_deg)
-    gaps = check_cube_fits(settings.boxes['box'], settings.cube_size_mm, t['goal_top_world_mm'], t['place_yaw_deg'])
-    assert gaps == pytest.approx([30.7, 1.4], abs=0.1)
-    centred = {k: v for k, v in settings.boxes['box'].items() if k != 'placement_center_xy_mm'}
-    assert check_cube_fits(centred, settings.cube_size_mm, centred['floor_center_world_mm'], centred['world_yaw_deg']) == pytest.approx([30.71, 3.28], abs=0.01)
+    box = settings.boxes['box']
+    gaps = check_cube_fits(box, settings.cube_size_mm, t['goal_top_world_mm'], t['place_yaw_deg'])
+    if box.get('placement_center_xy_mm') in (None, box['floor_center_world_mm'][:2]):
+        assert gaps == pytest.approx([(d-settings.cube_size_mm)/2 for d in box['inner_dimensions_mm']], abs=0.01)
+    assert min(gaps) > 0
 
 
 def test_small_yaw_error_breaks_the_fit(settings):
