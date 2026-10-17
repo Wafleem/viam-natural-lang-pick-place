@@ -41,3 +41,21 @@ def test_motion_needs_confirmation():
         with_confirmation(command, False)
     assert with_confirmation(command, True)['workcell_ready'] is True
     assert 'workcell_ready' not in with_confirmation({'action': 'status'}, False)
+
+
+@pytest.mark.parametrize('text,select,place', [
+    ('put the cub in the books', 'only', {'type': 'box'}),
+    ('move the cute onto the rink', 'only', {'type': 'ring'}),
+    ('place the write cube in the orage box', 'right', {'color': 'orange'}),
+    ('pick up the cubee and put it in the boxx', 'only', {'type': 'box'}),
+])
+def test_misheard_or_misspelled_words(text, select, place):
+    result = parse(text)
+    assert result['command'] == {'action': 'pick_place', 'pick': {'object': 'cube', 'select': select}, 'place': place}
+    assert 'read as' in result['explanation']
+
+
+def test_clean_text_is_not_rewritten_and_motion_words_are_not_guessed():
+    assert 'heard_as' not in parse('put the cube in the box')
+    with pytest.raises(ValueError):
+        parse('rest')
