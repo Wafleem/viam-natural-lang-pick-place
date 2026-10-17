@@ -80,8 +80,8 @@ def test_targets_are_deterministic(settings, observation, kin):
     a = compute_targets(settings, observation, 'box', kin, settings.overview_joints_deg)
     b = compute_targets(settings, observation, 'box', kin, settings.overview_joints_deg)
     assert json.dumps(a, sort_keys=True, default=float) == json.dumps(b, sort_keys=True, default=float)
-    # grip spot: 15 mm from the top-face centre, toward the edge facing image-top, every time
-    assert a['grasp']['offset_in_cube_mm'][:2] == pytest.approx([0, -15], abs=1e-6)
+    # grip spot: grasp_toward_image_top_mm from the top-face centre, toward image-top, every time
+    assert a['grasp']['offset_in_cube_mm'][:2] == pytest.approx([0, -settings.grasp_toward_image_top_mm], abs=1e-6)
 
 
 def test_memory_persists_and_unknown_blocks_reset(settings, kin, urdf, tmp_path):
@@ -148,3 +148,63 @@ def test_fixed_ring_spot_needs_no_vision(attrs, observation, kin):
     from pickplace.planning import scene_world
     labels = {g.label for g in scene_world(s, obs, t, 'placed', 'ring').obstacles[0].geometries}
     assert {'vision-ring', 'vision-ring-45', 'vision-ring-90', 'vision-ring-135'} <= labels
+
+
+def test_missed_seal_or_drop_retries_then_gives_up(settings, kin, urdf, tmp_path):
+    cycle, arm, gripper, *_ = make_cycle(settings, kin, urdf, settings.overview_joints_deg)
+    cycle.memory = CubeMemory(tmp_path)
+    dropped = []
+
+    def first_lift_drops(on):  # seals every time; the first check after a lift shows it gone
+        if on and cycle.events[-1]['stage'] == 'lift' and not dropped:
+            dropped.append(True)
+            return False
+        return on
+    gripper.script = first_lift_drops
+
+    async def seen_ok(goal, remembered=None):
+        return {'cube_left_pick_spot': True, 'detail': 'simulated'}
+    cycle.verify_outcome = seen_ok
+    asyncio.run(cycle.run('box'))
+    names = [e['stage'] for e in cycle.events]
+    assert names.count('press') == 2 and 'retrying_pick' in names and names[-1] == 'complete'
+    assert [e['held'] for e in cycle.events if e['stage'] == 'hold_check'] == [False, True]
+
+    # Never seals: no lift at all, pick_retries+1 presses, then a clear error.
+    cycle2, arm2, gripper2, *_ = make_cycle(settings, kin, urdf, settings.overview_joints_deg)
+    cycle2.memory = CubeMemory(tmp_path/'b')
+    gripper2.script = lambda on: False
+    from pickplace.cycle import CycleError
+    with pytest.raises(CycleError, match='No grip'):
+        asyncio.run(cycle2.run('box'))
+    names = [e['stage'] for e in cycle2.events]
+    assert names.count('press') == settings.pick_retries+1 and 'lift' not in names
+
+
+def test_carried_cube_sweep_catches_the_wall(settings, kin):
+    """The cube hangs 200 mm under the cups: a wrist tilt swings it far past the TCP."""
+    from pickplace.planning import carried_cube_violations
+    G = [[-1, 0, 0, 0], [0, 1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]]
+    from pickplace.vision_geometry import downward_pose
+    q = kin.ik(downward_pose(np.array([350.0, 0.0, 350.0]), 0.0), settings.overview_joints_deg, 5)
+    tcp_x = kin.fk(q)[0, 3]
+    wall = [('wall-front', [tcp_x+160, 0, 454], [100, 3000, 1600], 0.0)]  # face 110 mm past the TCP
+    assert carried_cube_violations(kin, [q, q], G, 200, wall, 0) == []  # hanging straight down: clear
+    tilted = list(q)
+    tilted[4] += 40  # wrist pitch swings the cube outward
+    bad = carried_cube_violations(kin, [q, tilted], G, 200, wall, 25)
+    assert bad and bad[0][0] == 'wall-front'
+
+
+def test_hover_trial_returns_cube_to_pick_spot(settings, kin, urdf, tmp_path):
+    cycle, arm, gripper, *_ = make_cycle(settings, kin, urdf, settings.overview_joints_deg)
+    cycle.memory = CubeMemory(tmp_path)
+    cycle.memory.set('table', how='seen')
+    result = asyncio.run(cycle.hover_trial('box', seconds=0))
+    names = [e['stage'] for e in cycle.events]
+    for a, b in [('transfer', 'hovering'), ('hovering', 'return_to_pick'), ('return_to_pick', 'set_down'), ('set_down', 'retract')]:
+        assert names.index(a) < names.index(b)
+    assert 'place' not in names and gripper.calls[-1] == 'open'
+    # set down exactly at the pick contact, and memory unchanged
+    assert kin.fk(arm.q)[:3, 3].tolist() == pytest.approx(kin.fk(settings.overview_joints_deg)[:3, 3].tolist(), abs=1e-6)
+    assert cycle.memory.location['place'] == 'table' and result['hover']['goal'] == 'box'
