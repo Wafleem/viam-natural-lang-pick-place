@@ -87,6 +87,8 @@ class PickPlaceService(Generic, EasyResource):
             'goals': s.goals, 'action': getattr(self, 'action', ''),
             # Fields the code-3 web app (code3-web) checks before allowing a send.
             'available_goals': s.goals, 'calibrated': bool(s.calibration),
+            'goal_details': [{'name': 'ring', 'type': 'ring'}]+[
+                {'name': n, 'type': 'box', 'color': b.get('color')} for n, b in s.boxes.items()],
             'suction': {'mode': 'open_loop', 'holding_feedback_used': False, 'press_depth_mm': s.press_depth_mm,
                         'suction_dwell_s': s.suction_dwell_s, 'release_dwell_s': s.release_dwell_s},
             'speeds_deg_s': {'travel': s.travel_speed_deg_s, 'approach': s.approach_speed_deg_s, 'press': s.press_speed_deg_s},
