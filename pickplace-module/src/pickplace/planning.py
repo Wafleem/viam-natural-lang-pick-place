@@ -106,8 +106,10 @@ def scene_world(settings, observation, targets, cube_state, goal, workcell=()):
         obstacles.extend(ring_prisms(xy, top-h/2, d, h))
     obstacles.extend(box_obstacles(s))
     obstacles.extend(other_cubes(s, observation))
-    side = s.side_boxes.get(goal)
-    obstacles.extend(workcell_prisms(workcell, s.carry_clearance_mm, side['panels'] if side else ()))
+    # Side-box panels (and the wall right behind them) are modelled at their true size for every goal:
+    # a 25 mm buffer around a box mounted over the work area blocks valid arm poses for the other goals.
+    exact = {f for b in s.side_boxes.values() for f in b['panels']}
+    obstacles.extend(workcell_prisms(workcell, s.carry_clearance_mm, exact))
     if cube_state == 'carried':
         # Tool Z points down into the cube. The cup sits press_depth_mm inside the top
         # face, so the cube spans [-press, size] along tool Z (conservative both ways).
@@ -262,10 +264,17 @@ class Planner:
             upright = s.carry_upright_deg if cube_state == 'carried' and kind == 'joint' and not side else None
             checked = [w for w in self.workcell if not (side and name in ('place', 'retract') and w[0] in side['panels'])]
             for attempt in range(5):
-                path = await self.segment(start, world, goal_deg=value if what == 'joint' else None,
-                                          pose=value if what == 'pose' else None, straight=kind == 'straight',
-                                          allow=allowed_contacts(s, contacts, goal, targets.get('source_place', 'table')),
-                                          upright=upright)
+                for crash in range(3):  # the motion service occasionally crashes internally (nil pointer): retry
+                    try:
+                        path = await self.segment(start, world, goal_deg=value if what == 'joint' else None,
+                                                  pose=value if what == 'pose' else None, straight=kind == 'straight',
+                                                  allow=allowed_contacts(s, contacts, goal, targets.get('source_place', 'table')),
+                                                  upright=upright)
+                        break
+                    except Exception as e:
+                        if crash == 2 or not any(k in str(e) for k in ('nil pointer', 'INTERNAL', 'invalid memory address')):
+                            raise
+                        await asyncio.sleep(.3)
                 # The carried cube is part of the arm: its swept volume must clear the walls
                 # and ceiling with margin. The planner is sampling-based, so re-plan if not.
                 bad = carried_cube_violations(self.kin, path, targets['grasp']['tcp_in_cube'], s.cube_size_mm,
@@ -309,8 +318,15 @@ class Planner:
                 start = path[-1]
             return out
 
-        parts = await asyncio.gather(chain(['approach'], list(start_deg)), chain(['descend', 'press', 'lift'], qp),
-                                     chain(['transfer'], qp), chain(['place', 'retract'], qq), chain(['return'], qq))
+        try:
+            parts = await asyncio.gather(chain(['approach'], list(start_deg)), chain(['descend', 'press', 'lift'], qp),
+                                         chain(['transfer'], qp), chain(['place', 'retract'], qq), chain(['return'], qq))
+        except Exception as e:
+            if not any(k in str(e) for k in ('nil pointer', 'INTERNAL', 'invalid memory address')):
+                raise
+            # The motion service did not survive concurrent requests this time: plan one chain at a time.
+            parts = [await chain(['approach'], list(start_deg)), await chain(['descend', 'press', 'lift'], qp),
+                     await chain(['transfer'], qp), await chain(['place', 'retract'], qq), await chain(['return'], qq)]
         paths = dict(item for part in parts for item in part)
 
         def gap(a, b):
