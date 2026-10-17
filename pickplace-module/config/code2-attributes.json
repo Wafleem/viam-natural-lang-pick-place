@@ -73,15 +73,15 @@
     "oZ": 1,
     "theta": -90
   },
-  "grasp_toward_image_top_mm": 15,
+  "grasp_toward_image_top_mm": 0,
   "placement_correction_world_xy_mm": [
     9.534296774206078,
     -15.333753734481174
   ],
   "placement_world_yaw_deg": 0,
-  "press_depth_mm": 18,
+  "press_depth_mm": 20,
   "pre_contact_mm": 20,
-  "suction_dwell_s": 1.5,
+  "suction_dwell_s": 2.5,
   "release_dwell_s": 1.0,
   "clearance_mm": 100,
   "travel_speed_deg_s": 20,
