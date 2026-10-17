@@ -20,6 +20,7 @@ from google.protobuf.json_format import MessageToDict
 from viam.proto.component.arm import JointPositions, MoveOptions
 
 from .kinematics import ArmKinematics
+from .memory import CubeMemory
 from .planning import Planner
 from .task import compute_targets
 from .transforms import pose_matrix
@@ -42,6 +43,7 @@ class PickPlaceCycle:
         self.lease_token = ''
         self.kin = None
         self.last_frame = None
+        self.memory = CubeMemory()
 
     # ---- bookkeeping -------------------------------------------------------
     def event(self, stage, **detail):
@@ -131,7 +133,7 @@ class PickPlaceCycle:
             await asyncio.sleep(self.s.release_dwell_s)
 
     # ---- perception --------------------------------------------------------
-    async def capture(self, require_ring, select='only'):
+    async def capture(self, require_ring, select='only', require_cube=True):
         q0 = await self.joints()
         props = MessageToDict(await self.read(lambda: self.camera.get_properties(timeout=5)))
         pose = await self.pose(self.s.camera, 'world')
@@ -150,7 +152,7 @@ class PickPlaceCycle:
             raise CycleError('Arm moved during camera capture')
         attrs = {'cube_size_mm': self.s.cube_size_mm, 'table_z_mm': self.s.table_z_mm}
         depth_mm = decode_depth(depth.data)
-        obs = await asyncio.to_thread(analyze, bgr, depth_mm, props, pose, attrs, require_ring, select)
+        obs = await asyncio.to_thread(analyze, bgr, depth_mm, props, pose, attrs, require_ring, select, require_cube)
         obs.update(capture_time=stamp, observation_joints_deg=q0)
         self.last_frame = (bgr, depth_mm, props, pose)
         return obs
@@ -224,22 +226,33 @@ class PickPlaceCycle:
             self.event('arm_stop_error', error=str(e))
 
     # ---- commands ----------------------------------------------------------
-    async def verify_pickup(self):
-        """Vision stands in for the unreliable suction sensor: back at the overview, is a cube
-        still where we picked it? Never raises; reports what it saw."""
-        picked = self.observation.get('cube', {}).get('top_center_world_mm')
-        if picked is None:
-            return {'cube_left_pick_spot': None, 'detail': 'no pick position recorded'}
+    async def verify_outcome(self, goal, remembered=None):
+        """Vision stands in for the unreliable suction sensor. Back at the overview: is a cube still
+        where we picked it from the table? Is one at the goal, if the goal is a table spot?
+        Never raises; reports what it saw."""
         await asyncio.sleep(.5)
         try:
-            obs = await self.capture(require_ring=False, select='nearest')
+            obs = await self.capture(require_ring=False, select='nearest', require_cube=False)
         except Exception as e:
             return {'cube_left_pick_spot': None, 'detail': f'check failed: {e}'}
-        remaining = [c for c in obs.get('cubes', [])
-                     if np.linalg.norm(np.subtract(c['top_center_world_mm'][:2], picked[:2])) < 40]
-        if remaining:
-            return {'cube_left_pick_spot': False, 'detail': 'a cube is still at the pick spot: suction likely did not hold'}
-        return {'cube_left_pick_spot': True, 'detail': 'pick spot is empty', 'cubes_still_visible': len(obs.get('cubes', []))}
+        cubes = [c['top_center_world_mm'] for c in obs.get('cubes', [])]
+        result = {'cubes_visible': len(cubes)}
+        picked = None if remembered else self.observation.get('cube', {}).get('top_center_world_mm')
+        if picked is not None:
+            still = any(np.linalg.norm(np.subtract(c[:2], picked[:2])) < 40 for c in cubes)
+            result['cube_left_pick_spot'] = not still
+        if goal == 'home':
+            from .calibration import calibrated_xy
+            result['cube_at_goal'] = any(np.linalg.norm(calibrated_xy(self.s.calibration, c)-self.s.home['xy_mm']) < 40 for c in cubes)
+        if result.get('cube_left_pick_spot') is False:
+            result['detail'] = 'a cube is still at the pick spot: suction likely did not hold'
+        elif result.get('cube_at_goal') is False:
+            result['detail'] = 'no cube seen at the home spot'
+        elif result.get('cube_at_goal'):
+            result['detail'] = 'cube seen at the home spot'
+        else:
+            result['detail'] = 'pick spot is empty' if picked is not None else 'not checked (cube was not on the table)'
+        return result
 
     async def recover_limits(self):
         """Move ONLY joints sitting inside the limit margin (<= margin + 1 deg) back into range.
@@ -285,13 +298,13 @@ class PickPlaceCycle:
         self.event('settling_camera')
         await asyncio.sleep(1)
 
-    async def plan(self, goal, observation=None, start=None):
+    async def plan(self, goal, observation=None, start=None, source=None):
         """Plan the full cycle from `start` (default: current joints). No motion."""
         planner = Planner(self.motion, self.s, self.kin)
         observation = observation or self.observation
         start = start or await self.joints()
         self.event('planning', goal=goal)
-        self.targets = native(await asyncio.to_thread(compute_targets, self.s, observation, goal, self.kin, start))
+        self.targets = native(await asyncio.to_thread(compute_targets, self.s, observation, goal, self.kin, start, source))
         plans = await planner.plan_cycle(observation, self.targets, start, goal)
         self.plan_summary = {
             'goal': goal,
@@ -300,21 +313,48 @@ class PickPlaceCycle:
                        for name, path, speed in plans},
             'pickup_tcp_world': self.targets['press'], 'release_tcp_world': self.targets['release'],
             'press_depth_mm': self.s.press_depth_mm, 'cube_yaw_deg': self.targets['cube_yaw_deg'],
-            'place_yaw_deg': self.targets['place_yaw_deg'],
+            'place_yaw_deg': self.targets['place_yaw_deg'], 'source_place': self.targets['source_place'],
         }
         return plans
 
-    async def run(self, goal, select='only'):
-        """One full cycle. On failure the arm stops and suction stays as it was."""
+    async def look_for_obstacles(self):
+        """When the cube is not on the table: one frame for the ring and any other cubes."""
+        try:
+            obs = await self.capture(require_ring=False, require_cube=False)
+        except Exception as e:
+            self.event('scene_check_failed', error=str(e))
+            return {}
+        issues = [i for i in obs.get('issues', []) if not i.startswith('Depth/world tabletop')]
+        if issues:
+            self.event('scene_check_issues', issues=issues)
+            return {k: obs[k] for k in ('camera_pose_world', 'camera_intrinsics', 'capture_time', 'observation_joints_deg') if k in obs}
+        obs.pop('cube', None)
+        return obs
+
+    async def run(self, goal, select='only', source='auto'):
+        """One full cycle to `goal`. The cube comes from vision when it is on the table, or from
+        the remembered placement when it sits in a box or on the ring (source='auto').
+        On failure the arm stops and suction stays as it was."""
         self.events = []
+        touched = False
         await self.preflight()
         await self.acquire_lease()
         try:
             await self.go_to_overview(Planner(self.motion, self.s, self.kin))
-            await self.detect(goal, select)
-            plans = dict((name, (path, speed)) for name, path, speed in await self.plan(goal))
+            remembered = self.memory.pickable_source() if source == 'auto' else source
+            if remembered is None:
+                await self.detect(goal, select)
+            else:
+                self.event('using_remembered_cube', place=remembered['place'])
+                self.observation = await self.look_for_obstacles()
+                if goal == 'ring' and 'ring' not in self.observation:
+                    raise CycleError('Ring goal needs the ring in view from the overview')
+            if remembered is not None and remembered['place'] == goal:
+                raise CycleError(f'The cube is already at {goal}')
+            plans = dict((name, (path, speed)) for name, path, speed in await self.plan(goal, source=remembered))
             for name in ('approach', 'descend'):
                 await self.execute(name, *plans[name])
+            touched = True  # from here on a failure may leave the cube anywhere along the path
             await self.suction_on()
             await self.execute('press', *plans['press'])
             self.event('suction_dwell', seconds=self.s.suction_dwell_s)
@@ -324,14 +364,55 @@ class PickPlaceCycle:
             await self.suction_off()
             for name in ('retract', 'return'):
                 await self.execute(name, *plans[name])
-            outcome = await self.verify_pickup()
+            outcome = await self.verify_outcome(goal, remembered)
+            self.remember(goal, outcome)
             self.event('complete', goal=goal, **outcome)
-            return {**copy.deepcopy(self.plan_summary), 'outcome': outcome}
+            return {**copy.deepcopy(self.plan_summary), 'outcome': outcome, 'cube_location': copy.deepcopy(self.memory.location)}
         except BaseException:
+            if touched:
+                self.memory.set('unknown', how='cycle stopped or failed after suction on; check the workcell')
             await self.stop_arm()
             raise
         finally:
             await self.release_lease()
+
+    def remember(self, goal, outcome):
+        t = self.targets
+        if outcome.get('cube_left_pick_spot') is False:
+            # Suction did not hold: the cube is still where it was picked.
+            if t['source_place'] in ('table', 'home'):
+                self.memory.set(t['source_place'], how='vision: still at the pick spot after the cycle')
+            return
+        self.memory.set(goal, t['goal_top_world_mm'], t['place_yaw_deg'], t['grasp']['tcp_in_cube'],
+                        how='placed by code-2' + (' and seen there' if outcome.get('cube_at_goal') else ''))
+
+    async def reset_cube(self):
+        """Put the cube back on its home table spot, from wherever code-2 last placed it."""
+        if not self.s.home:
+            raise CycleError('No home spot configured (attribute "home": {"xy_mm": [x, y], "yaw_deg": a})')
+        place = self.memory.location.get('place')
+        if place == 'home':
+            return {'moved': False, 'detail': 'cube is already home', 'cube_location': copy.deepcopy(self.memory.location)}
+        if place == 'unknown':
+            raise CycleError('Cube location unknown: put it on the table in view (or set_cube_location), then retry')
+        return await self.run('home')
+
+    def set_location(self, place, goals):
+        """Operator correction after moving the cube by hand. No motion."""
+        if place not in ('unknown', 'table', *goals):
+            raise CycleError('place must be unknown, table or one of: '+', '.join(goals))
+        if place in ('unknown', 'table', 'home'):
+            return self.memory.set(place, how='set by operator')
+        # A box or the ring: assume it sits where code-2 would place it, gripped like a fresh pick.
+        from .task import goal_surface
+        top, yaw, _ = goal_surface(self.s, self.observation or {}, place) if place != 'ring' else (None, None, None)
+        if top is None:
+            raise CycleError('Cannot locate the ring without vision; use pick_place to put the cube there')
+        from .grasp_geometry import describe_grasp
+        from .vision_geometry import downward_pose
+        size = self.s.cube_size_mm
+        G = describe_grasp(top, downward_pose(top, yaw), yaw, [size, size])['tcp_in_cube']  # cup at the face centre
+        return self.memory.set(place, top.tolist(), float(yaw), G, how='set by operator (assumed seated at the goal)')
 
     async def reset(self):
         await self.preflight()
@@ -389,8 +470,13 @@ class PickPlaceCycle:
         q = await self.joints()
         if max(abs(a-b) for a, b in zip(q, self.s.overview_joints_deg)) > .25:
             raise CycleError('Dry run detects from the calibrated overview; run {"action":"reset"} first')
-        await self.detect(goal, select)
-        await self.plan(goal)
+        remembered = self.memory.pickable_source()
+        if remembered is None:
+            await self.detect(goal, select)
+        else:
+            self.event('using_remembered_cube', place=remembered['place'])
+            self.observation = await self.look_for_obstacles()
+        await self.plan(goal, source=remembered)
         self.event('planned', goal=goal)
         return copy.deepcopy(self.plan_summary)
 

@@ -12,6 +12,7 @@ TWO_BOXES = {**DESCRIBE, 'place': {'goals': DESCRIBE['place']['goals']+[{'name':
     ('can you put the right cube on the hoop?', 'dry_run', 'right', {'type': 'ring'}),
     ('put the second cube in blue_box', 'pick_place', {'index': 1}, {'goal': 'blue_box'}),
     ('drop the cube in the blue bin', 'pick_place', 'only', {'color': 'blue'}),
+    ('put the cube on the table', 'pick_place', 'only', {'type': 'home'}),
 ])
 def test_parse(text, action, pick, place):
     command = parse(text, TWO_BOXES)['command']
@@ -19,7 +20,8 @@ def test_parse(text, action, pick, place):
     validate(command, TWO_BOXES)
 
 
-@pytest.mark.parametrize('text,action', [('stop!', 'stop'), ('go home', 'reset'), ("what's the status", 'status')])
+@pytest.mark.parametrize('text,action', [('stop!', 'stop'), ('go home', 'reset'), ("what's the status", 'status'),
+                                         ('reset the cube', 'reset_cube'), ('put the cube back', 'reset_cube')])
 def test_simple_intents(text, action):
     assert parse(text)['command']['action'] == action
 

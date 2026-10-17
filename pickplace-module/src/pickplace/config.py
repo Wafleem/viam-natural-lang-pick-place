@@ -35,6 +35,7 @@ class Settings:
     calibration: dict
     overview_joints_deg: list
     boxes: dict  # name -> accepted box reference; every box is also a collision obstacle
+    home: dict | None = None  # {"xy_mm": [x, y], "yaw_deg": a}: the cube's table spot, goal "home"
     default_goal: str = 'ring'
     cube_size_mm: float = 200.0
     table_z_mm: float = -23.0
@@ -72,15 +73,18 @@ class Settings:
         if attrs.get('aligned_depth_enabled') is not True:
             raise ValueError('Enable cam align_color_depth and set aligned_depth_enabled=true')
         boxes = _boxes(attrs)
+        home = _home(attrs.get('home'))
+        if home is not None and 'home' in boxes:
+            raise ValueError('"home" is the table spot; give the box another name')
         goal = attrs.get('default_goal', 'ring')
-        if goal != 'ring' and goal not in boxes:
-            raise ValueError('default_goal must be "ring" or a configured box name: '+', '.join(boxes))
+        if goal not in ['ring', *boxes, *(['home'] if home else [])]:
+            raise ValueError('default_goal must be "ring", "home" or a configured box name: '+', '.join(boxes))
         correction = attrs.get('placement_correction_world_xy_mm', [0, 0])
         if not isinstance(correction, list) or len(correction) != 2 or math.hypot(*correction) > 25:
             raise ValueError('placement_correction_world_xy_mm needs two values with magnitude <= 25 mm')
         mount = attrs.get('camera_mount_reference')
         s = cls(
-            calibration=cal, overview_joints_deg=overview, boxes=boxes, default_goal=goal,
+            calibration=cal, overview_joints_deg=overview, boxes=boxes, home=home, default_goal=goal,
             cube_size_mm=_number(attrs, 'cube_size_mm', 200, 20, 400),
             table_z_mm=_number(attrs, 'table_z_mm', -23, -500, 500),
             press_depth_mm=_number(attrs, 'press_depth_mm', 10, 0, 20),
@@ -109,7 +113,8 @@ class Settings:
 
     @property
     def goals(self):
-        return ['ring']+list(self.boxes)
+        """Every place the cube can go: the home table spot (if configured), the ring, each box."""
+        return (['home'] if self.home else [])+['ring']+list(self.boxes)
 
     def resolve_place(self, place):
         """Web/NL place target -> goal name. Accepts "ring", a box name, or
@@ -122,6 +127,8 @@ class Settings:
             goal = place['goal']
         elif place.get('type') == 'ring':
             goal = 'ring'
+        elif place.get('type') in ('home', 'table'):
+            goal = 'home'
         else:
             colour = place.get('color')
             matches = [n for n, b in self.boxes.items() if colour is None or b.get('color') == str(colour).lower()]
@@ -135,6 +142,20 @@ class Settings:
     def dependencies(self):
         names = [self.arm, self.gripper, self.camera, self.motion]
         return names+([self.lease_service] if self.lease_service else [])
+
+
+def _home(raw):
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ValueError('home must be {"xy_mm": [x, y], "yaw_deg": a}')
+    xy = raw.get('xy_mm')
+    yaw = raw.get('yaw_deg', 0)
+    if not isinstance(xy, list) or len(xy) != 2 or any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) for v in xy):
+        raise ValueError('home.xy_mm needs two finite numbers (tool XY of the cube centre)')
+    if isinstance(yaw, bool) or not isinstance(yaw, (int, float)) or not math.isfinite(yaw):
+        raise ValueError('home.yaw_deg must be a finite number')
+    return {'xy_mm': [float(v) for v in xy], 'yaw_deg': float(yaw)}
 
 
 BOX_KEYS = ('floor_center_world_mm', 'placement_center_xy_mm', 'inner_dimensions_mm', 'world_yaw_deg', 'rim_z_mm')

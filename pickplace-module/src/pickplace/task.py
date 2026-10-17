@@ -39,21 +39,46 @@ def _travel(a, b):
     return sum(abs(x-y) for x, y in zip(a, b))
 
 
-def compute_targets(settings, observation, goal, kinematics, start_joints_deg):
-    """All tool poses for one cycle plus IK joint goals for the free-space moves."""
+def goal_surface(settings, observation, goal):
+    """(cube top centre when seated at the goal, base yaw, box or None) for any place."""
+    s, size = settings, settings.cube_size_mm
+    box = s.boxes.get(goal)
+    if box is not None:
+        return np.array([*placement_xy(box), box['floor_center_world_mm'][2]+size]), box['world_yaw_deg'], box
+    if goal == 'home':
+        # A table spot: the cube rests on the calibrated tabletop (taught contact height).
+        return np.array([*s.home['xy_mm'], s.calibration['pickup_tcp_z_mm']]), s.home['yaw_deg'], None
+    return ring_target(observation, s.calibration)+np.array([*s.placement_correction_world_xy_mm, 0.]), s.placement_world_yaw_deg, None
+
+
+def compute_targets(settings, observation, goal, kinematics, start_joints_deg, source=None):
+    """All tool poses for one cycle plus IK joint goals for the free-space moves.
+
+    source=None picks the cube vision found on the table. Otherwise source is the remembered
+    cube location {place, top_world_mm, yaw_deg, tcp_in_cube} from an earlier placement: the cup
+    returns to the same spot on the cube it held before (no vision needed inside a box).
+    """
     if goal not in settings.goals:
         raise ValueError('goal must be one of: '+', '.join(settings.goals))
     s, cal, margin = settings, settings.calibration, settings.joint_limit_margin_deg
-    cube_top, detected_yaw = cube_target(observation, cal)
     size = s.cube_size_mm
-    box = s.boxes.get(goal)
-
-    if box is not None:
-        goal_top = np.array([*placement_xy(box), box['floor_center_world_mm'][2]+size])
-        place_base_yaw = box['world_yaw_deg']
+    if source is None:
+        cube_top, detected_yaw = cube_target(observation, cal)
+        source_place = 'table'
+        candidates = []
+        for k in range(4):
+            yaw = detected_yaw+90*k
+            offset = grasp_offset(observation, cal, yaw, s.grasp_toward_image_top_mm)
+            contact = downward_pose(cube_top+offset, yaw)
+            candidates.append((yaw, contact, describe_grasp(cube_top, contact, yaw, observation['cube']['top_dimensions_mm'])))
     else:
-        goal_top = ring_target(observation, cal)+np.array([*s.placement_correction_world_xy_mm, 0.])
-        place_base_yaw = s.placement_world_yaw_deg
+        cube_top, source_place = np.asarray(source['top_world_mm'], float), source['place']
+        G = {'tcp_in_cube': source['tcp_in_cube']}
+        # The square cube may be re-gripped at any of its four 90 deg turns of the same cup spot.
+        candidates = [(source['yaw_deg']+90*k, place_tcp(cube_top, source['yaw_deg']+90*k, G),
+                       {**copy.deepcopy(source.get('grasp', {})), 'tcp_in_cube': source['tcp_in_cube']}) for k in range(4)]
+    source_box = s.boxes.get(source_place)
+    goal_top, place_base_yaw, box = goal_surface(s, observation, goal)
 
     pick_z, place_z = cube_top[2], goal_top[2]
     # Approach heights, each side on its own. A shared, high carry height (rim + cube + 100 mm)
@@ -61,28 +86,28 @@ def compute_targets(settings, observation, goal, kinematics, start_joints_deg):
     # 360 mm above the cube. The planner routes the transfer around boxes with the carried cube.
     above_pick_z = pick_z+s.clearance_mm
     above_place_z = place_z+s.clearance_mm
+    if source_box is not None:
+        above_pick_z = max(above_pick_z, source_box['rim_z_mm']+size+s.box_entry_clearance_mm)
     if box is not None:
         # Carried cube bottom (TCP - cube size) clears this box's rim before the vertical entry.
         above_place_z = max(above_place_z, box['rim_z_mm']+size+s.box_entry_clearance_mm)
 
     # Pickup yaw: four equivalent square orientations; keep the one nearest the start.
     best = None
-    for k in range(4):
-        yaw = detected_yaw+90*k
-        offset = grasp_offset(observation, cal, yaw, s.grasp_toward_image_top_mm)
-        contact = downward_pose(cube_top+offset, yaw)
+    for yaw, contact, grasp in candidates:
         above = {**contact, 'z': above_pick_z}
         try:
             q = kinematics.ik(above, start_joints_deg, margin)
             kinematics.ik({**contact, 'z': pick_z-s.press_depth_mm}, q, margin)
         except ValueError:
             continue
-        if best is None or _travel(q, start_joints_deg) < best[0]:
-            best = (_travel(q, start_joints_deg), yaw, contact, above, q)
+        # From memory, prefer the exact remembered grip (first candidate): same cup spot every time.
+        cost = _travel(q, start_joints_deg)+(0 if source is None or not candidates.index((yaw, contact, grasp)) else 1e6)
+        if best is None or cost < best[0]:
+            best = (cost, yaw, contact, above, q, grasp)
     if best is None:
         raise ValueError('No pickup orientation is reachable with the joint-limit margin')
-    _, pick_yaw, contact, above_pick, q_above_pick = best
-    grasp = describe_grasp(cube_top, contact, pick_yaw, observation['cube']['top_dimensions_mm'])
+    _, pick_yaw, contact, above_pick, q_above_pick, grasp = best
 
     best = None
     for k in range(4):
@@ -104,7 +129,7 @@ def compute_targets(settings, observation, goal, kinematics, start_joints_deg):
     _, place_yaw, release, above_place, q_above_place = best
 
     return {
-        'goal': goal,
+        'goal': goal, 'source_place': source_place,
         'cube_top_world_mm': cube_top.tolist(), 'cube_yaw_deg': pick_yaw,
         'goal_top_world_mm': goal_top.tolist(), 'place_yaw_deg': place_yaw,
         'above_pick': above_pick, 'pre_contact': {**contact, 'z': pick_z+s.pre_contact_mm},
