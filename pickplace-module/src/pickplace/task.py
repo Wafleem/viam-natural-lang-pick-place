@@ -94,41 +94,56 @@ def compute_targets(settings, observation, goal, kinematics, start_joints_deg, s
         # Carried cube bottom (TCP - cube size) clears this box's rim before the vertical entry.
         above_place_z = max(above_place_z, box['rim_z_mm']+size+s.box_entry_clearance_mm)
 
-    # Pickup yaw: four equivalent square orientations; keep the one nearest the start.
-    best = None
-    for yaw, contact, grasp in candidates:
+    # Pickup and placement are chosen TOGETHER. Each pickup yaw (cube symmetry) is tried on both
+    # wrist branches, and each placement yaw likewise; the cost weights the carried transfer 3x,
+    # so a wrist-branch flip (J4/J5 ~ 180 deg) happens on the empty approach, never while the
+    # cube hangs from the cups (a flip swings the 200 mm cube sideways through the cell).
+    picks = []
+    for i, (yaw, contact, grasp) in enumerate(candidates):
         above = {**contact, 'z': above_pick_z}
         try:
-            q = kinematics.ik(above, start_joints_deg, margin)
-            kinematics.ik({**contact, 'z': pick_z-s.press_depth_mm}, q, margin)
+            options = kinematics.ik_branches(above, start_joints_deg, margin)
         except ValueError:
             continue
-        # From memory, prefer the exact remembered grip (first candidate): same cup spot every time.
-        cost = _travel(q, start_joints_deg)+(0 if source is None or not candidates.index((yaw, contact, grasp)) else 1e6)
-        if best is None or cost < best[0]:
-            best = (cost, yaw, contact, above, q, grasp)
-    if best is None:
+        for q in options:
+            try:
+                kinematics.ik({**contact, 'z': pick_z-s.press_depth_mm}, q, margin)
+            except ValueError:
+                continue
+            # From memory, prefer the exact remembered grip (first candidate): same cup spot every time.
+            picks.append((_travel(q, start_joints_deg)+(0 if source is None or not i else 1e6), yaw, contact, above, q, grasp))
+    if not picks:
         raise ValueError('No pickup orientation is reachable with the joint-limit margin')
-    _, pick_yaw, contact, above_pick, q_above_pick, grasp = best
-
     best = None
-    for k in range(4):
-        place_yaw = place_base_yaw+90*k
-        if box is not None:
-            check_cube_fits(box, size, goal_top, place_yaw)
-        release = place_tcp(goal_top, place_yaw, grasp)
-        release['z'] += s.release_above_goal_mm  # optional drop height (default 0)
-        above = {**release, 'z': above_place_z}
-        try:
-            q = kinematics.ik(above, q_above_pick, margin)
-            kinematics.ik(release, q, margin)
-        except ValueError:
-            continue
-        if best is None or _travel(q, q_above_pick) < best[0]:
-            best = (_travel(q, q_above_pick), place_yaw, release, above, q)
+    for pick_cost, yaw, contact, above_p, q_p, grasp in picks:
+        for k in range(4):
+            place_yaw = place_base_yaw+90*k
+            if box is not None:
+                try:
+                    check_cube_fits(box, size, goal_top, place_yaw)
+                except ValueError:
+                    continue
+            release = place_tcp(goal_top, place_yaw, grasp)
+            release['z'] += s.release_above_goal_mm  # optional drop height (default 0)
+            above = {**release, 'z': above_place_z}
+            try:
+                options = kinematics.ik_branches(above, q_p, margin)
+            except ValueError:
+                continue
+            for q in options:
+                try:
+                    kinematics.ik(release, q, margin)
+                except ValueError:
+                    continue
+                cost = pick_cost+3*_travel(q, q_p)
+                if best is None or cost < best[0]:
+                    best = (cost, (yaw, contact, above_p, q_p, grasp), (place_yaw, release, above, q))
     if best is None:
+        if box is not None:
+            check_cube_fits(box, size, goal_top, place_base_yaw)  # report the fit gaps if that is the reason
         raise ValueError('No placement orientation is reachable with the joint-limit margin')
-    _, place_yaw, release, above_place, q_above_place = best
+    (pick_yaw, contact, above_pick, q_above_pick, grasp), (place_yaw, release, above_place, q_above_place) = best[1], best[2]
+
 
     return {
         'goal': goal, 'source_place': source_place,

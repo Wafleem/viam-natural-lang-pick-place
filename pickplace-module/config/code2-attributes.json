@@ -58,10 +58,10 @@
     "camera_intrinsics": {
       "widthPx": 1280,
       "heightPx": 720,
-      "focalXPx": 920.016357421875,
-      "focalYPx": 920.522705078125,
-      "centerXPx": 639.3700561523438,
-      "centerYPx": 364.5325927734375
+      "focalXPx": 926.09716796875,
+      "focalYPx": 926.3632202148438,
+      "centerXPx": 637.05859375,
+      "centerYPx": 376.2195129394531
     }
   },
   "camera_mount_reference": {
@@ -84,10 +84,10 @@
   "suction_dwell_s": 3.0,
   "release_dwell_s": 1.0,
   "clearance_mm": 100,
-  "travel_speed_deg_s": 20,
-  "approach_speed_deg_s": 10,
+  "travel_speed_deg_s": 30,
+  "approach_speed_deg_s": 15,
   "press_speed_deg_s": 1,
-  "acceleration_deg_s2": 25,
+  "acceleration_deg_s2": 37.5,
   "joint_limit_margin_deg": 5,
   "lease_service": "code-1",
   "boxes": [
@@ -126,6 +126,92 @@
     "height_mm": 25
   },
   "pick_retries": 3,
-  "sweep_speed_deg_s": 20,
-  "carry_clearance_mm": 25
+  "sweep_speed_deg_s": 30,
+  "carry_clearance_mm": 50,
+  "workcell_obstacles": [
+    {
+      "frame": "wall-front",
+      "dims_mm": [
+        100,
+        3000,
+        483
+      ]
+    },
+    {
+      "frame": "wall-front-2",
+      "dims_mm": [
+        100,
+        3000,
+        1277
+      ]
+    },
+    {
+      "frame": "ceiling",
+      "dims_mm": [
+        3000,
+        3000,
+        100
+      ]
+    },
+    {
+      "frame": "cardboard-box",
+      "dims_mm": [
+        349,
+        286,
+        254
+      ]
+    }
+  ],
+  "carry_upright_deg": 15,
+  "camera_correction": {
+    "depth_scale": 0.94,
+    "matrix": [
+      [
+        0.9994785979127998,
+        -0.003663328903026417,
+        -0.03207978079120088,
+        12.921787506455976
+      ],
+      [
+        0.00423840266842537,
+        0.9998312146606636,
+        0.017876748390077295,
+        -16.194809817862463
+      ],
+      [
+        0.03200887778544473,
+        -0.018003394444662157,
+        0.99932542724149,
+        9.96625402916186
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ]
+  },
+  "sweep_offsets_mm": [
+    [
+      0,
+      240
+    ],
+    [
+      0,
+      330
+    ],
+    [
+      0,
+      120
+    ],
+    [
+      0,
+      -120
+    ],
+    [
+      100,
+      0
+    ]
+  ]
 }
