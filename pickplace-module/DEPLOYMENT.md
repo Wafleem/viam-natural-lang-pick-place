@@ -213,9 +213,13 @@ Verified without motion (night of Oct 16–17, 2026):
 - Live motion planner: every stage of a cube → box cycle plans from the overview. The wrist stays
   on the taught branch (J4 180–191.5°) like the operator-taught cycle; 0.0.24 drove J4 to 360°.
 - Live motion planner: cube → ring plans with the ring at (440, 130).
-- Deployed on armfarm19 (0.0.26–0.0.29, cloud builds Done): `status`, `describe` and `self_test`
+- Deployed on armfarm19, now **0.0.30** (cloud build Done): `status`, `describe` and `self_test`
   run on the robot. self_test passes kinematics, camera (intrinsics match calibration) and lease.
   The reset plan is correctly blocked until `recover_limits`, because J4 sits at 360.0008°.
+
+- Teammate web app (branch `integrate-web-ui`, `code3-web/`): moved to `pick_place`. 51/51 tests on
+  Node 22. Fed the robot's live status it unlocks Send for ring, box and orange-box tasks and blocks
+  a blue box. The robot parses its exact `pick`/`place` arguments (checked with `dry_run`).
 
 Not verified:
 - Any physical execution of this module (the e-stop has been latched the whole time).
