@@ -54,16 +54,22 @@ class FakeArm:
 class FakeGripper:
     def __init__(self):
         self.calls = []
+        self.on = False
+        self.script = None  # optional callable(on) -> bool to fake missed seals / drops
 
     async def grab(self, timeout=None):
         self.calls.append('grab')
+        self.on = True
         return True
 
     async def open(self, timeout=None):
         self.calls.append('open')
+        self.on = False
 
     async def is_holding_something(self, *a, **k):
-        raise AssertionError('Holding feedback must never be read (open-loop suction)')
+        from types import SimpleNamespace
+        held = self.script(self.on) if self.script else self.on
+        return SimpleNamespace(is_holding_something=held, meta={})
 
 
 class FakeCamera:
@@ -119,14 +125,14 @@ def test_full_cycle_open_loop_from_overview(settings, kin, urdf, goal):
     stages = [e['stage'] for e in cycle.events]
     assert stages[0] == 'suction_off'  # every run starts by releasing suction
     stages = stages[stages.index('detecting'):]
-    order = ['approach', 'descend', 'suction_on', 'press', 'suction_dwell', 'lift', 'transfer', 'place', 'suction_off', 'retract', 'return', 'complete']
+    order = ['approach', 'descend', 'suction_on', 'press', 'seal', 'lift', 'hold_check', 'transfer', 'place', 'suction_off', 'retract', 'return', 'complete']
     assert [s for s in stages if s in order] == order
     assert gripper.calls == ['open', 'grab', 'open']  # reset release, grab before press, release at goal
     speeds = dict(zip([s for s in stages if s in ('approach', 'descend', 'press', 'lift', 'transfer', 'place', 'retract', 'return')], [m[1] for m in arm.moves]))
     assert speeds['press'] == settings.press_speed_deg_s and speeds['transfer'] == settings.travel_speed_deg_s
     # The press stage ends exactly press_depth_mm below the taught contact.
     press_path = arm.moves[2][0]
-    assert kin.fk(press_path[-1])[2, 3] == pytest.approx(settings.calibration['pickup_tcp_z_mm']-10, abs=.05)
+    assert kin.fk(press_path[-1])[2, 3] == pytest.approx(settings.calibration['pickup_tcp_z_mm']-settings.press_depth_mm, abs=.05)
     # No executed node comes near a limit except the calibrated overview itself (J5 at -95).
     for path, _ in arm.moves:
         for q in path:
@@ -134,7 +140,7 @@ def test_full_cycle_open_loop_from_overview(settings, kin, urdf, goal):
             assert abs(q[3]) < 360-settings.joint_limit_margin_deg
             assert goal != 'box' or 150 < q[3] < 210  # box cycle stays on the taught wrist branch
     assert arm.q == pytest.approx(settings.overview_joints_deg)
-    assert summary['press_depth_mm'] == 10 and lease.reserved == ''
+    assert summary['press_depth_mm'] == settings.press_depth_mm and lease.reserved == ''
     json.dumps(summary)
     assert all(type(v) is float for v in summary['pickup_tcp_world'].values())
     press_request = motion.requests[2]
@@ -193,16 +199,17 @@ def test_service_command_guards(settings, kin, urdf, attrs):
         asyncio.run(svc.do_command({'action': 'run', 'goal': 'shelf', 'workcell_ready': True}))
     status = asyncio.run(svc.do_command({'action': 'status'}))
     assert status['goals'] == ['home', 'ring', 'box']
-    assert status['suction'] == {'mode': 'open_loop', 'holding_feedback_used': False, 'press_depth_mm': 10.0,
-                                 'suction_dwell_s': 1.0, 'release_dwell_s': 1.0}
+    assert status['suction'] == {'mode': 'closed_loop', 'holding_feedback_used': True, 'press_depth_mm': settings.press_depth_mm,
+                                 'suction_dwell_s': settings.suction_dwell_s, 'seal_settle_s': settings.seal_settle_s,
+                                 'pick_retries': settings.pick_retries, 'release_dwell_s': settings.release_dwell_s}
     json.dumps(status)
 
 
-def test_no_holding_feedback_in_source():
+def test_holding_feedback_read_in_one_place():
     from pathlib import Path
     src = Path(__file__).resolve().parents[1]/'src'
-    for path in src.rglob('*.py'):
-        assert 'is_holding_something' not in path.read_text(), path
+    users = [p.name for p in src.rglob('*.py') if 'is_holding_something' in p.read_text()]
+    assert users == ['cycle.py']
 
 
 def test_self_test_reports_without_motion(settings, kin, urdf):

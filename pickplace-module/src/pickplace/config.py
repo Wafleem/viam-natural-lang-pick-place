@@ -44,8 +44,10 @@ class Settings:
     # then press press_depth_mm below the taught contact height. Suction is open loop.
     press_depth_mm: float = 10.0
     pre_contact_mm: float = 20.0
-    suction_dwell_s: float = 1.0
+    suction_dwell_s: float = 1.0  # the longest wait for the holding sensor to report a seal
     release_dwell_s: float = 1.0
+    pick_retries: int = 3  # re-picks when the holding sensor shows no seal or a drop at the lift
+    seal_settle_s: float = 0.5  # extra time on the cube after the sensor first reports a seal
     clearance_mm: float = 100.0
     box_entry_clearance_mm: float = 30.0
     # Camera sweep when the cube is not fully seen from the overview: sideways shifts (dx, dy mm)
@@ -97,6 +99,8 @@ class Settings:
             pre_contact_mm=_number(attrs, 'pre_contact_mm', 20, 5, 100),
             suction_dwell_s=_number(attrs, 'suction_dwell_s', 1.0, 0, 10),
             release_dwell_s=_number(attrs, 'release_dwell_s', 1.0, 0, 10),
+            pick_retries=int(_number(attrs, 'pick_retries', 3, 0, 5)),
+            seal_settle_s=_number(attrs, 'seal_settle_s', 0.5, 0, 5),
             clearance_mm=_number(attrs, 'clearance_mm', 100, 30, 300),
             box_entry_clearance_mm=_number(attrs, 'box_entry_clearance_mm', 30, 10, 200),
             release_above_goal_mm=_number(attrs, 'release_above_goal_mm', 0, 0, 50),
