@@ -506,6 +506,8 @@ class PickPlaceCycle:
         return None
 
     async def locate_cube(self, goal, select, remembered):
+        if remembered is not None and remembered.get('place') in self.s.side_boxes:
+            remembered = None  # a cube on a side shelf is never re-gripped from memory: take it out by hand
         """Vision first, every time: overview, then a sweep. People usually move the cube back by
         hand, so the remembered placement is only a fallback when the camera cannot see the cube on
         the table (in the box or up on the ring it fails the table-height check or sits in the box).
