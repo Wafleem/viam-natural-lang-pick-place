@@ -426,7 +426,7 @@ class PickPlaceCycle:
         for name, path, speed in await planner.plan_reset(await self.joints()):
             await self.execute(name, path, speed)
         self.event('settling_camera')
-        await asyncio.sleep(1)
+        await asyncio.sleep(.4)
 
     async def workcell_scene(self):
         """Live world poses of the machine's wall/ceiling frames -> [(frame, xyz, dims, yaw)]."""
