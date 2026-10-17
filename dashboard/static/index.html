@@ -32,6 +32,7 @@
     background:var(--panel2); color:var(--ink); cursor:pointer; transition:border-color .12s, box-shadow .12s; }
   button:hover { border-color:var(--uv); box-shadow:0 0 0 3px var(--glow); }
   button.primary { background:var(--uv); border-color:var(--uv); color:#fff; }
+  button.mic.on { background:var(--warn); border-color:var(--warn); color:#fff; }
   button.move { border-color:var(--warn); } button.move::before { content:"⚠ "; color:var(--warn); }
   button.primary.move::before { color:#fff; }
   button.stop { background:#e11d48; border-color:#ff8fa6; color:#fff; font-weight:700; letter-spacing:.08em; padding:8px 16px; }
@@ -131,8 +132,10 @@
   <section>
     <h2>Say it</h2>
     <div class="row"><input type="text" id="nltext" style="flex:1" value="put the left cube in the orange box">
-      <button onclick="nlParse()">Parse</button></div>
+      <button onclick="nlParse()">Parse</button>
+      <button class="mic" id="mic" title="Hold, speak, release" onpointerdown="micDown(event)" onpointerup="micUp()" onpointerleave="micUp()">🎤 Hold to talk</button></div>
     <div class="muted" id="nlexplain">Parsed commands appear in the raw box below for review before sending.</div>
+    <div class="muted">Voice uses the browser's speech recognition (Chrome sends audio to Google). It only fills and parses the command; sending still needs <i>workcell clear</i> and <b>Send</b>.</div>
   </section>
   <section>
     <h2>Outcome</h2>
@@ -305,6 +308,38 @@ async function nlParse() {
     $('raw').value = JSON.stringify(c, null, 1);
     $('nlexplain').textContent = r.explanation + (r.moves ? ' — moves the arm: tick workcell clear, then Send.' : ' — no motion.');
   } catch (e) { $('nlexplain').textContent = 'Not understood: ' + e.message; }
+}
+// ---- voice: hold to talk. Speech recognisers return several guesses; try them in order
+// and keep the first one the parser understands (helps with accents and misheard words).
+const Speech = window.SpeechRecognition || window.webkitSpeechRecognition;
+let rec = null, guesses = [];
+function micDown(e) {
+  e.preventDefault();
+  if (!Speech) { $('nlexplain').textContent = 'Voice input needs Chrome or Edge; this browser has no speech recognition.'; return; }
+  if (rec) return;
+  guesses = []; rec = new Speech();
+  rec.lang = navigator.language || 'en-US'; rec.interimResults = true; rec.continuous = true; rec.maxAlternatives = 5;
+  rec.onresult = ev => {
+    const finals = [...ev.results].filter(r => r.isFinal);
+    guesses = finals.length === 1 ? [...finals[0]].map(a => a.transcript.trim())
+      : [finals.map(r => r[0].transcript.trim()).join(' ')];
+    $('nltext').value = [...ev.results].map(r => r[0].transcript).join(' ').trim();
+  };
+  rec.onerror = ev => { $('nlexplain').textContent = 'Voice error: ' + ev.error
+    + (ev.error === 'not-allowed' ? ' (allow the microphone for this page)' : ev.error === 'network' ? ' (this browser cannot reach its speech service; try Chrome)' : ''); };
+  rec.onend = () => { rec = null; $('mic').classList.remove('on'); voiceParse(); };
+  $('mic').classList.add('on'); $('nlexplain').textContent = 'Listening… release the button when you finish.';
+  rec.start();
+}
+function micUp() { if (rec) rec.stop(); }
+async function voiceParse() {
+  const options = guesses.filter(Boolean);
+  if (!options.length) { if (!/error/i.test($('nlexplain').textContent)) $('nlexplain').textContent = "Didn't catch that. Hold the button and speak again."; return; }
+  let chosen = options[0];
+  for (const text of options) { try { await api('/api/nl', {text}); chosen = text; break; } catch (e) { /* try the next guess */ } }
+  $('nltext').value = chosen;
+  await nlParse();
+  $('nlexplain').textContent = `🎤 heard "${chosen}"` + (options.length > 1 && chosen !== options[0] ? ` (best of ${options.length} guesses)` : '') + ' — ' + $('nlexplain').textContent;
 }
 async function armdo(command, connection_type) {
   try { const r = await api('/api/arm/do', {command, connection_type}); $('armreply').textContent = pretty(r); toast(r); }
