@@ -154,10 +154,42 @@
       ]
     },
     {
-      "frame": "cardboard-box",
+      "frame": "box-shell-floor",
       "dims_mm": [
         349,
         286,
+        10
+      ]
+    },
+    {
+      "frame": "box-shell-top",
+      "dims_mm": [
+        349,
+        286,
+        10
+      ]
+    },
+    {
+      "frame": "box-shell-back",
+      "dims_mm": [
+        10,
+        286,
+        254
+      ]
+    },
+    {
+      "frame": "box-shell-left",
+      "dims_mm": [
+        349,
+        10,
+        254
+      ]
+    },
+    {
+      "frame": "box-shell-right",
+      "dims_mm": [
+        349,
+        10,
         254
       ]
     }
