@@ -254,7 +254,7 @@ class PickPlaceCycle:
             ref = {'issues': []}
         planner = Planner(self.motion, s, self.kin)
         world = WorldState(obstacles=[GeometriesInFrame(reference_frame='world', geometries=[
-            prism('scan-objects-envelope', [400, 0, 125], [600, 800, 350])]+box_obstacles(s))])
+            prism('scan-objects-envelope', [425, 0, 110], [550, 800, 270])]+box_obstacles(s))])
         g = cal['yaw_correction_deg']
         a = np.radians(g)
         to_raw = np.array([[np.cos(a), np.sin(a)], [-np.sin(a), np.cos(a)]])
@@ -270,7 +270,11 @@ class PickPlaceCycle:
                 except ValueError:
                     tried.append({'shift_mm': off, 'skipped': 'unreachable'})
                     continue
-                path = await planner.segment(await self.joints(), world, goal_deg=q, margin=1.0)
+                try:
+                    path = await planner.segment(await self.joints(), world, goal_deg=q, margin=1.0)
+                except Exception as e:  # a view that cannot be planned is skipped, not fatal
+                    tried.append({'shift_mm': off, 'skipped': 'no collision-free path: '+str(e)[-80:]})
+                    continue
                 await self.execute(f'sweep_{off[0]:+g}_{off[1]:+g}', path, s.sweep_speed_deg_s)
                 await asyncio.sleep(.3)
                 hits = []
