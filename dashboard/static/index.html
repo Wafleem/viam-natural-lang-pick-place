@@ -135,6 +135,9 @@
     <div class="say-mic"><div class="voice-controls"><button class="mic pill" id="mic" title="Hold to talk, or activate to start and stop" aria-pressed="false" aria-describedby="mic-help"
       onpointerdown="micDown(event)" onpointerup="micUp('pointer')" onpointerleave="micUp('pointer')" onpointercancel="micUp('pointer')" onclick="micClick(event)">🎤 Hold to talk</button>
       <label class="voice-toggle"><input type="checkbox" id="spoken-replies" checked onchange="toggleSpokenReplies()"> Spoken replies</label>
+      <label for="reply-voice">Voice</label><select id="reply-voice" onchange="changeReplyVoice()"><option value="">Automatic</option></select>
+      <button id="preview-voice" onclick="previewReplyVoice()">Preview voice</button>
+      <span class="muted" id="voice-source"></span>
       <span class="muted" id="voice-reply-status" role="status" aria-atomic="true"></span></div>
       <span id="mic-help" class="muted">Hold with mouse or touch. With a keyboard, press Enter or Space to start, then again to stop.</span></div>
     <div class="say-input"><input type="text" id="nltext" placeholder="e.g. put the cube in the box" value=""
@@ -412,11 +415,52 @@ const Speech = window.SpeechRecognition || window.webkitSpeechRecognition;
 let rec = null, guesses = [], micMode = null, micStopping = false;
 const synthesis = window.speechSynthesis && typeof window.SpeechSynthesisUtterance === 'function' ? window.speechSynthesis : null;
 let voiceGeneration = 0, replyGeneration = 0, currentReply = null;
+let replyVoices = [], savedReplyVoice = '';
+try { savedReplyVoice = localStorage.getItem('uv-reply-voice') || ''; } catch (e) {}
+// Exclude character/effect voices from normal speech choices.
+const effectVoice = /^(Albert|Bad News|Bahh|Bells|Boing|Bubbles|Cellos|Fred|Good News|Grandma|Grandpa|Jester|Junior|Organ|Ralph|Superstar|Trinoids|Whisper|Wobble|Zarvox)(\b|$)/i;
+function voiceScore(voice) {
+  const quality = /natural|enhanced|premium|neural/i.test(voice.name) ? 1000
+    : /google us english/i.test(voice.name) ? 900 : /google.*english/i.test(voice.name) ? 800
+    : /\b(Samantha|Daniel|Karen|Moira|Tessa|Aaron|Arthur)\b/i.test(voice.name) ? 600 : voice.default ? 400 : 100;
+  return quality + (/^en-US$/i.test(voice.lang) ? 20 : 0) + (voice.default ? 10 : 0);
+}
+function selectedReplyVoice() {
+  return replyVoices.find(v => v.voiceURI === $('reply-voice').value) || replyVoices[0];
+}
+function updateVoiceControls() {
+  $('preview-voice').disabled = !synthesis || !!rec || !$('spoken-replies').checked;
+  $('reply-voice').disabled = !synthesis || !!rec;
+  const voice = selectedReplyVoice();
+  $('voice-source').textContent = voice ? (voice.localService ? 'On-device voice' : 'Online voice · needs internet') : 'Browser default voice';
+}
+function refreshReplyVoices() {
+  try { replyVoices = synthesis ? synthesis.getVoices().filter(v => /^en(?:-|$)/i.test(v.lang) && !effectVoice.test(v.name)) : []; }
+  catch (e) { replyVoices = []; }
+  replyVoices.sort((a, b) => voiceScore(b) - voiceScore(a) || a.name.localeCompare(b.name));
+  const select = $('reply-voice'), automatic = document.createElement('option');
+  automatic.value = ''; automatic.textContent = replyVoices[0] ? 'Automatic — ' + replyVoices[0].name : 'Automatic';
+  select.replaceChildren(automatic);
+  replyVoices.forEach(v => { const option = document.createElement('option'); option.value = v.voiceURI;
+    option.textContent = v.name + ' · ' + v.lang + (v.localService ? '' : ' · online'); select.appendChild(option); });
+  select.value = replyVoices.some(v => v.voiceURI === savedReplyVoice) ? savedReplyVoice : '';
+  updateVoiceControls();
+}
+function changeReplyVoice() {
+  savedReplyVoice = $('reply-voice').value; stopSpokenReply();
+  try { localStorage.setItem('uv-reply-voice', savedReplyVoice); } catch (e) {}
+}
+function previewReplyVoice() {
+  if (rec || !$('spoken-replies').checked) return;
+  invalidateVoice();
+  speakReply("Hey there. Tell me where you'd like the cube to go, and I'll read it back before you press Send.", voiceGeneration, replyGeneration);
+}
 function stopSpokenReply() {
   replyGeneration++; currentReply = null;
   try { synthesis?.cancel(); } catch (e) { /* text feedback remains available */ }
   $('voice-reply-status').textContent = !synthesis ? 'Spoken replies unavailable in this browser.'
     : $('spoken-replies').checked ? 'Voice replies on.' : 'Voice replies muted.';
+  updateVoiceControls();
 }
 function invalidateVoice() {
   voiceGeneration++; stopSpokenReply();
@@ -434,10 +478,10 @@ function speakReply(message, token, replyToken) {
   try {
     const utterance = new window.SpeechSynthesisUtterance(message); currentReply = utterance;
     utterance.lang = document.documentElement.lang || 'en';
-    const voices = synthesis.getVoices();
-    const localVoice = voices.find(v => v.localService && v.lang.toLowerCase().startsWith('en') && v.default)
-      || voices.find(v => v.localService && v.lang.toLowerCase().startsWith('en'));
-    if (localVoice) utterance.voice = localVoice;
+    // Keep the voice's natural pitch and a lightly quicker conversational pace.
+    utterance.rate = 1.08; utterance.pitch = 1;
+    refreshReplyVoices(); const voice = selectedReplyVoice();
+    if (voice) { utterance.voice = voice; utterance.lang = voice.lang; }
     utterance.onend = () => { if (currentReply === utterance) { currentReply = null; $('voice-reply-status').textContent = 'Spoken reply finished.'; } };
     utterance.onerror = () => { if (currentReply === utterance) { currentReply = null; $('voice-reply-status').textContent = 'Audio unavailable. Read the response below.'; } };
     $('voice-reply-status').textContent = 'Replying…'; synthesis.speak(utterance);
@@ -452,11 +496,14 @@ function spokenInterpretation(result) {
       : `into the ${p.color ? p.color + ' box' : target}`;
     task = `${c.action === 'dry_run' ? 'plan moving' : 'move'} ${cube} ${destination}`;
   }
-  return 'I understood: ' + task + '. ' + (result.moves
-    ? 'Confirm the workcell is clear, then press Send to robot.' : 'Press Send to robot when you are ready.');
+  task = task.charAt(0).toLowerCase() + task.slice(1);
+  return 'Got it. ' + task.charAt(0).toUpperCase() + task.slice(1) + '. ' + (result.moves
+    ? "Check the workcell is clear, then press Send to robot when you're ready." : "Press Send to robot when you're ready.");
 }
 try { $('spoken-replies').checked = localStorage.getItem('uv-spoken-replies') !== 'false'; } catch (e) {}
 if (!synthesis) { $('spoken-replies').checked = false; $('spoken-replies').disabled = true; }
+if (synthesis) synthesis.addEventListener('voiceschanged', refreshReplyVoices);
+refreshReplyVoices();
 stopSpokenReply();
 $('nltext').addEventListener('input', () => { invalidateVoice(); micUp(); say('idle', 'Command changed. Press Check to review it.'); });
 function micIdle(session) {
@@ -464,6 +511,7 @@ function micIdle(session) {
   rec = null; micMode = null; micStopping = false;
   $('mic').classList.remove('on'); $('mic').textContent = '🎤 Hold to talk';
   $('mic').setAttribute('aria-pressed', 'false');
+  updateVoiceControls();
   return true;
 }
 function micDown(e) {
@@ -482,6 +530,7 @@ function micStart(mode) {
   let session;
   try { session = new Speech(); } catch (e) { say('bad', 'Voice input could not start: ' + e.message); return; }
   guesses = []; rec = session; micMode = mode; micStopping = false;
+  updateVoiceControls();
   session.lang = navigator.language || 'en-US'; session.interimResults = true; session.continuous = true; session.maxAlternatives = 5;
   session.onresult = ev => {
     if (rec !== session || token !== voiceGeneration) return;
@@ -509,7 +558,7 @@ async function voiceParse(token, replyToken) {
   const options = guesses.filter(Boolean);
   if (!currentVoice(token)) return;
   if (!options.length) {
-    const message = "I didn't catch that. Please try again, or type your command.";
+    const message = "I missed that one! Could you say it again, or type it in?";
     say('bad', message); speakReply(message, token, replyToken); return;
   }
   let chosen, result, error;
@@ -521,7 +570,7 @@ async function voiceParse(token, replyToken) {
   }
   if (!result) {
     say('bad', "Sorry, I didn't understand that. " + (error?.message || 'Please try again.'));
-    speakReply("I couldn't match that to a supported command. Please try again, or type your command.", token, replyToken); return;
+    speakReply("Hmm, I don't know that command yet. Try asking me to move the cube to the box or the ring.", token, replyToken); return;
   }
   $('nltext').value = chosen; presentInterpretation(result);
   say($('nlexplain').dataset.kind, `🎤 heard "${chosen}"` + (options.length > 1 && chosen !== options[0] ? ` (best of ${options.length} guesses)` : '') + ' — ' + $('nlexplain').textContent);
