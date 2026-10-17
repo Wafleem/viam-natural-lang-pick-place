@@ -45,6 +45,10 @@ Steps, at the robot:
 
 ## 1. One-time setup on your computer
 
+From the repo root, `make setup`, then `make test`, `make dashboard`, `make plan-check GOAL=ring`,
+`make deploy VERSION=0.0.31` and `make select VERSION=0.0.31 APPLY=1` cover the steps below
+(`make help` lists them). Long form:
+
 ```bash
 cd ~/Documents/armfarm-pickplace/pickplace-module
 python3 -m venv .venv
@@ -177,6 +181,9 @@ Keep the physical e-stop in reach. The software `stop` is not an e-stop.
 | `lease_service` | `code-1` | `""` disables the lease |
 
 ### Adding another box
+
+The math (frames, grasp transform, yaw choice, fit check) is in [GEOMETRY.md](GEOMETRY.md). The
+dashboard's Vision and Config tabs do every step below without editing JSON.
 
 Goals are `ring` plus one goal per entry in the `boxes` list. The older single `box` /
 `surveyed_box.box` attributes are still read as one box named `box`.
