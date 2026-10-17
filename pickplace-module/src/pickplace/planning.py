@@ -55,10 +55,13 @@ def scene_world(settings, observation, targets, cube_state, goal):
     table_top = s.calibration['pickup_tcp_z_mm']-size
     obstacles.append(prism(TABLE, [*(low+high)/2, table_top-100], [*(high-low), 200]))
     ring = observation.get('ring')
-    if ring:
+    top = s.calibration['place_tcp_z_mm']-size
+    if s.ring_spot:
+        xy, h, d = s.ring_spot['xy_mm'], s.ring_spot['height_mm'], s.ring_spot['diameter_mm']
+        obstacles.extend(ring_prisms(xy, top-h/2, d, h))
+    elif ring:
         from .calibration import calibrated_xy
         xy = calibrated_xy(s.calibration, ring['top_center_world_mm'])
-        top = s.calibration['place_tcp_z_mm']-size
         h, d = float(ring['height_mm']), float(ring['bounding_diameter_mm'])
         obstacles.extend(ring_prisms(xy, top-h/2, d, h))
     obstacles.extend(box_obstacles(s))
