@@ -13,7 +13,7 @@ from google.protobuf.json_format import MessageToDict
 from viam.proto.common import Geometry, GeometriesInFrame, Pose, PoseInFrame, RectangularPrism, Transform, Vector3, WorldState
 from viam.proto.service.motion import CollisionSpecification, Constraints, LinearConstraint
 
-from .box import cavity_geometry
+from .box import cavity_geometry, floor_label
 from .transforms import pose_matrix
 
 CUBE, RING, TABLE = 'vision-cube', 'vision-ring', 'vision-table'
@@ -39,10 +39,11 @@ def prism(label, xyz, dims, yaw=0.0):
 
 
 def scene_world(settings, observation, targets, cube_state, goal):
-    """WorldState with the cube (static or carried), ring, local table patch and box."""
+    """WorldState with the cube (static or carried), ring, local table patch and every box."""
     s, size = settings, settings.cube_size_mm
     cube_top, goal_top = np.array(targets['cube_top_world_mm']), np.array(targets['goal_top_world_mm'])
-    pad = 0.0 if goal == 'box' else 10.0
+    # No padding into a box (the measured opening is tight); 10 mm around the cube otherwise.
+    pad = 0.0 if goal in s.boxes else 10.0
     obstacles = []
     # Support patch whose top is the cube's bottom at pickup (taught contact - cube size).
     low = np.minimum(cube_top[:2], goal_top[:2])-size*.7
@@ -56,8 +57,7 @@ def scene_world(settings, observation, targets, cube_state, goal):
         top = s.calibration['place_tcp_z_mm']-size
         h, d = float(ring['height_mm']), float(ring['bounding_diameter_mm'])
         obstacles.append(prism(RING, [*xy, top-h/2], [d, d, h]))
-    if s.box:
-        obstacles.extend(prism(label, xyz, dims, yaw) for label, xyz, dims, yaw in cavity_geometry(s.box))
+    obstacles.extend(box_obstacles(s))
     if cube_state == 'carried':
         # Tool Z points down into the cube. The cup sits press_depth_mm inside the top
         # face, so the cube spans [-press, size] along tool Z (conservative both ways).
@@ -75,12 +75,17 @@ def scene_world(settings, observation, targets, cube_state, goal):
                       transforms=[Transform(reference_frame=CUBE, pose_in_observer_frame=observer, physical_object=cube)])
 
 
+def box_obstacles(settings):
+    return [prism(label, xyz, dims, yaw) for name, box in settings.boxes.items()
+            for label, xyz, dims, yaw in cavity_geometry(box, name)]
+
+
 def allowed_contacts(settings, contacts, goal):
     pairs = [(settings.gripper, CUBE)]
     if contacts == 'pickup':
         pairs += [(CUBE, 'table'), (CUBE, TABLE)]
     elif contacts == 'place':
-        pairs += [(CUBE, 'goal-box-floor' if goal == 'box' else RING)]
+        pairs += [(CUBE, floor_label(goal) if goal in settings.boxes else RING)]
     return pairs
 
 
@@ -167,8 +172,8 @@ class Planner:
             except Exception as e:
                 hint = ''
                 if 'violation between' in str(e):
-                    hint = (' -- a modelled obstacle blocks this stage. If it names a wall or goal-box-wall '
-                            'while the goal is the ring, move the ring clear of the box and walls.')
+                    hint = (' -- a modelled obstacle blocks this stage. If it names a wall or a goal-<box>-wall '
+                            'while the goal is the ring, move the ring clear of the boxes and walls.')
                 raise PlanError(f'Planning {name} failed: {e}{hint}') from e
             plans.append((name, path, speeds[speed]))
             start = path[-1]
@@ -182,7 +187,7 @@ class Planner:
         if not self.kin.within_limits(start_deg, 1.0):
             raise PlanError('A joint is at its limit; run {"action":"recover_limits","workcell_ready":true} first')
         static = [prism('reset-objects-envelope', [400, 0, 125], [600, 800, 350])]
-        box = [prism(l, xyz, dims, yaw) for l, xyz, dims, yaw in cavity_geometry(s.box)] if s.box else []
+        box = box_obstacles(s)
         tcp = self.kin.fk(start_deg)[:3, 3]
         plans, start = [], list(start_deg)
         if tcp[2] < 330:

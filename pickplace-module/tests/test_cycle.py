@@ -183,7 +183,10 @@ def test_service_command_guards(settings, kin, urdf, attrs):
         asyncio.run(svc.do_command({'action': 'run', 'goal': 'box'}))
     with pytest.raises(ValueError, match='Unknown action'):
         asyncio.run(svc.do_command({'action': 'start'}))
+    with pytest.raises(ValueError, match='goal must be one of'):
+        asyncio.run(svc.do_command({'action': 'run', 'goal': 'shelf', 'workcell_ready': True}))
     status = asyncio.run(svc.do_command({'action': 'status'}))
+    assert status['goals'] == ['ring', 'box']
     assert status['suction'] == {'mode': 'open_loop', 'holding_feedback_used': False, 'press_depth_mm': 10.0,
                                  'suction_dwell_s': 1.0, 'release_dwell_s': 1.0}
     json.dumps(status)
@@ -194,3 +197,20 @@ def test_no_holding_feedback_in_source():
     src = Path(__file__).resolve().parents[1]/'src'
     for path in src.rglob('*.py'):
         assert 'is_holding_something' not in path.read_text(), path
+
+
+def test_self_test_reports_without_motion(settings, kin, urdf):
+    cycle, arm, gripper, _, _ = make_cycle(settings, kin, urdf, FAILED_LIFT)
+    report = asyncio.run(cycle.self_test())
+    assert arm.moves == [] and gripper.calls == []
+    assert report['checks']['preflight_and_kinematics']['ok']
+    assert report['checks']['camera']['ok'] and report['checks']['camera']['intrinsics_match_calibration']
+    assert not report['checks']['reset_plan']['ok'] and 'recover_limits' in report['checks']['reset_plan']['error']
+    assert report['ok'] is False
+
+
+def test_measure_box_requires_overview(settings, kin, urdf):
+    cycle, arm, *_ = make_cycle(settings, kin, urdf, FAILED_LIFT)
+    with pytest.raises(CycleError, match='overview'):
+        asyncio.run(cycle.survey_box('box2'))
+    assert arm.moves == []

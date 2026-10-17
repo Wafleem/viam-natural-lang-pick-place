@@ -34,7 +34,7 @@ def _joints(value, label):
 class Settings:
     calibration: dict
     overview_joints_deg: list
-    box: dict | None
+    boxes: dict  # name -> accepted box reference; every box is also a collision obstacle
     default_goal: str = 'ring'
     cube_size_mm: float = 200.0
     table_z_mm: float = -23.0
@@ -69,23 +69,16 @@ class Settings:
         overview = _joints(cal['observation_joints_deg'], 'task_calibration.observation_joints_deg')
         if attrs.get('aligned_depth_enabled') is not True:
             raise ValueError('Enable cam align_color_depth and set aligned_depth_enabled=true')
-        box = attrs.get('box')
-        if box is None and isinstance(attrs.get('surveyed_box'), dict):
-            box = attrs['surveyed_box'].get('box')
-        if box is not None:
-            for key in ('floor_center_world_mm', 'inner_dimensions_mm', 'world_yaw_deg', 'rim_z_mm'):
-                if key not in box:
-                    raise ValueError('box.'+key+' is required')
-            box = {k: box[k] for k in ('floor_center_world_mm', 'placement_center_xy_mm', 'inner_dimensions_mm', 'world_yaw_deg', 'rim_z_mm') if k in box}
+        boxes = _boxes(attrs)
         goal = attrs.get('default_goal', 'ring')
-        if goal not in ('ring', 'box'):
-            raise ValueError('default_goal must be ring or box')
+        if goal != 'ring' and goal not in boxes:
+            raise ValueError('default_goal must be "ring" or a configured box name: '+', '.join(boxes))
         correction = attrs.get('placement_correction_world_xy_mm', [0, 0])
         if not isinstance(correction, list) or len(correction) != 2 or math.hypot(*correction) > 25:
             raise ValueError('placement_correction_world_xy_mm needs two values with magnitude <= 25 mm')
         mount = attrs.get('camera_mount_reference')
         s = cls(
-            calibration=cal, overview_joints_deg=overview, box=box, default_goal=goal,
+            calibration=cal, overview_joints_deg=overview, boxes=boxes, default_goal=goal,
             cube_size_mm=_number(attrs, 'cube_size_mm', 200, 20, 400),
             table_z_mm=_number(attrs, 'table_z_mm', -23, -500, 500),
             press_depth_mm=_number(attrs, 'press_depth_mm', 10, 0, 20),
@@ -110,6 +103,55 @@ class Settings:
             raise ValueError('press_depth_mm is unreasonably deep for this cube')
         return s
 
+    @property
+    def goals(self):
+        return ['ring']+list(self.boxes)
+
     def dependencies(self):
         names = [self.arm, self.gripper, self.camera, self.motion]
         return names+([self.lease_service] if self.lease_service else [])
+
+
+BOX_KEYS = ('floor_center_world_mm', 'placement_center_xy_mm', 'inner_dimensions_mm', 'world_yaw_deg', 'rim_z_mm')
+
+
+def _box(raw, label):
+    """One accepted box: floor centre (x,y,z), opening (2), yaw, rim z; optional placement XY."""
+    if not isinstance(raw, dict):
+        raise ValueError(label+' must be an object')
+    def vector(key, n):
+        v = raw.get(key)
+        if not isinstance(v, list) or len(v) != n or any(isinstance(x, bool) or not isinstance(x, (int, float)) or not math.isfinite(x) for x in v):
+            raise ValueError(f'{label}.{key} needs {n} finite numbers')
+        return [float(x) for x in v]
+    box = {'floor_center_world_mm': vector('floor_center_world_mm', 3), 'inner_dimensions_mm': vector('inner_dimensions_mm', 2)}
+    if 'placement_center_xy_mm' in raw:
+        box['placement_center_xy_mm'] = vector('placement_center_xy_mm', 2)
+    for key in ('world_yaw_deg', 'rim_z_mm'):
+        v = raw.get(key)
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):
+            raise ValueError(f'{label}.{key} must be a finite number')
+        box[key] = float(v)
+    if min(box['inner_dimensions_mm']) <= 0 or box['rim_z_mm'] <= box['floor_center_world_mm'][2]:
+        raise ValueError(label+' needs a positive opening and a rim above its floor')
+    return box
+
+
+def _boxes(attrs):
+    """`boxes: [{name, ...}]`, or the single legacy `box` / `surveyed_box.box` (named "box")."""
+    result = {}
+    if attrs.get('boxes') is not None:
+        if not isinstance(attrs['boxes'], list):
+            raise ValueError('boxes must be a list of {name, floor_center_world_mm, ...}')
+        for i, raw in enumerate(attrs['boxes']):
+            name = raw.get('name') if isinstance(raw, dict) else None
+            if not isinstance(name, str) or not name or name == 'ring' or name in result:
+                raise ValueError(f'boxes[{i}] needs a unique name other than "ring"')
+            result[name] = _box(raw, 'boxes.'+name)
+        return result
+    legacy = attrs.get('box')
+    if legacy is None and isinstance(attrs.get('surveyed_box'), dict):
+        legacy = attrs['surveyed_box'].get('box')
+    if legacy is not None:
+        result['box'] = _box({k: legacy[k] for k in BOX_KEYS if k in legacy}, 'box')
+    return result

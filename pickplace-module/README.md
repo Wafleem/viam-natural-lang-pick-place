@@ -15,7 +15,8 @@ src/pickplace/
   vision_geometry.py        aligned RGB-D cube/ring localisation and 5-frame consensus
   find_cube_ring.py         2D cube/ring detector
   calibration.py            fixed-overview calibration: camera XY -> tool XY, taught heights
-  box.py                    accepted box reference: fit check and collision cavity
+  box.py                    box fit check and collision cavity (any number of named boxes)
+  box_survey.py             measure a new orange Post-it box from the camera (candidate config entry)
   grasp_geometry.py         cube <-> TCP transform shared by pickup and release
   transforms.py             Viam orientation-vector pose math
   config.py                 attribute validation (accepts the existing code-2 attributes)

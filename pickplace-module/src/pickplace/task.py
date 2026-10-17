@@ -41,27 +41,26 @@ def _travel(a, b):
 
 def compute_targets(settings, observation, goal, kinematics, start_joints_deg):
     """All tool poses for one cycle plus IK joint goals for the free-space moves."""
-    if goal not in ('ring', 'box'):
-        raise ValueError('goal must be ring or box')
+    if goal not in settings.goals:
+        raise ValueError('goal must be one of: '+', '.join(settings.goals))
     s, cal, margin = settings, settings.calibration, settings.joint_limit_margin_deg
     cube_top, detected_yaw = cube_target(observation, cal)
     size = s.cube_size_mm
+    box = s.boxes.get(goal)
 
-    if goal == 'box':
-        if not s.box:
-            raise ValueError('Box goal needs the accepted box reference in config (box or surveyed_box.box)')
-        goal_top = np.array([*placement_xy(s.box), s.box['floor_center_world_mm'][2]+size])
-        place_base_yaw = s.box['world_yaw_deg']
+    if box is not None:
+        goal_top = np.array([*placement_xy(box), box['floor_center_world_mm'][2]+size])
+        place_base_yaw = box['world_yaw_deg']
     else:
         goal_top = ring_target(observation, cal)+np.array([*s.placement_correction_world_xy_mm, 0.])
         place_base_yaw = s.placement_world_yaw_deg
 
     pick_z, place_z = cube_top[2], goal_top[2]
     above_z = max(pick_z, place_z)+s.clearance_mm
-    if s.box:
-        # Whenever the box is in the workcell, the carried cube bottom (TCP - cube size)
-        # stays clearance_mm above its rim.
-        above_z = max(above_z, s.box['rim_z_mm']+size+s.clearance_mm)
+    # Every configured box is in the workcell: the carried cube bottom (TCP - cube size)
+    # stays clearance_mm above the highest rim.
+    for other in s.boxes.values():
+        above_z = max(above_z, other['rim_z_mm']+size+s.clearance_mm)
 
     # Pickup yaw: four equivalent square orientations; keep the one nearest the start.
     best = None
@@ -85,8 +84,8 @@ def compute_targets(settings, observation, goal, kinematics, start_joints_deg):
     best = None
     for k in range(4):
         place_yaw = place_base_yaw+90*k
-        if goal == 'box':
-            check_cube_fits(s.box, size, goal_top, place_yaw)
+        if box is not None:
+            check_cube_fits(box, size, goal_top, place_yaw)
         release = place_tcp(goal_top, place_yaw, grasp)
         above = {**release, 'z': above_z}
         try:

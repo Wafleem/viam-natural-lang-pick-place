@@ -79,23 +79,6 @@
     -15.333753734481174
   ],
   "placement_world_yaw_deg": 0,
-  "box": {
-    "floor_center_world_mm": [
-      298.21765274582395,
-      -143.14392804022765,
-      0.8515096458647804
-    ],
-    "placement_center_xy_mm": [
-      298.381023162077,
-      -141.2509647265067
-    ],
-    "inner_dimensions_mm": [
-      261.42119597346306,
-      206.55619823246064
-    ],
-    "world_yaw_deg": -4.93263579539594,
-    "rim_z_mm": 129.99776389646297
-  },
   "press_depth_mm": 10,
   "pre_contact_mm": 20,
   "suction_dwell_s": 1.0,
@@ -106,5 +89,25 @@
   "press_speed_deg_s": 2,
   "acceleration_deg_s2": 6,
   "joint_limit_margin_deg": 5,
-  "lease_service": "code-1"
+  "lease_service": "code-1",
+  "boxes": [
+    {
+      "name": "box",
+      "floor_center_world_mm": [
+        298.21765274582395,
+        -143.14392804022765,
+        0.8515096458647804
+      ],
+      "placement_center_xy_mm": [
+        298.381023162077,
+        -141.2509647265067
+      ],
+      "inner_dimensions_mm": [
+        261.42119597346306,
+        206.55619823246064
+      ],
+      "world_yaw_deg": -4.93263579539594,
+      "rim_z_mm": 129.99776389646297
+    }
+  ]
 }

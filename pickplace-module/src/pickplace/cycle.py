@@ -41,6 +41,7 @@ class PickPlaceCycle:
         self.plan_summary = {}
         self.lease_token = ''
         self.kin = None
+        self.last_frame = None
 
     # ---- bookkeeping -------------------------------------------------------
     def event(self, stage, **detail):
@@ -132,9 +133,41 @@ class PickPlaceCycle:
         if max(abs(a-b) for a, b in zip(q0, await self.joints())) > .05:
             raise CycleError('Arm moved during camera capture')
         attrs = {'cube_size_mm': self.s.cube_size_mm, 'table_z_mm': self.s.table_z_mm}
-        obs = await asyncio.to_thread(analyze, bgr, decode_depth(depth.data), props, pose, attrs, require_ring)
+        depth_mm = decode_depth(depth.data)
+        obs = await asyncio.to_thread(analyze, bgr, depth_mm, props, pose, attrs, require_ring)
         obs.update(capture_time=stamp, observation_joints_deg=q0)
+        self.last_frame = (bgr, depth_mm, props, pose)
         return obs
+
+    async def survey_box(self, name, frames=3):
+        """No motion. From the overview, measure an orange Post-it box -> candidate `boxes` entry.
+
+        Three frames must agree (centre 3 mm, opening 3 mm, yaw 1 deg). The cube is not
+        required in view; the tabletop must be.
+        """
+        from .box_survey import survey
+        await self.preflight()
+        if max(abs(a-b) for a, b in zip(await self.joints(), self.s.overview_joints_deg)) > .25:
+            raise CycleError('Box survey uses the overview calibration; run {"action":"reset"} first')
+        self.event('surveying_box', name=name)
+        found = []
+        for _ in range(frames):
+            obs = await self.capture(require_ring=False)
+            result = await asyncio.to_thread(survey, *self.last_frame, obs, self.s.calibration, name, self.s.cube_size_mm)
+            if 'issues' in result:
+                raise CycleError('; '.join(result['issues']))
+            found.append(result['candidate'])
+            await asyncio.sleep(.15)
+        centers = np.array([c['floor_center_world_mm'] for c in found])
+        dims = np.array([c['inner_dimensions_mm'] for c in found])
+        yaws = np.array([c['world_yaw_deg'] for c in found])
+        if np.ptp(centers, axis=0).max() > 3 or np.ptp(dims, axis=0).max() > 3 or np.ptp(yaws) > 1:
+            raise CycleError('Box measurement unstable across frames; keep the camera and box still')
+        candidate = dict(found[int(np.argmin(np.linalg.norm(centers-np.median(centers, axis=0), axis=1)))])
+        candidate['inner_dimensions_mm'] = dims.min(axis=0).tolist()  # tightest opening seen
+        self.event('box_candidate', name=name)
+        return {'candidate': candidate, 'frames': found,
+                'next_step': 'Check the opening with a tape measure, then add the candidate to the "boxes" attribute'}
 
     async def detect(self, goal):
         """Five consecutive frames; four (incl. the newest two) must agree."""
@@ -271,6 +304,44 @@ class PickPlaceCycle:
             raise
         finally:
             await self.release_lease()
+
+    async def self_test(self):
+        """No motion and no gripper calls: checks everything a cycle depends on from the current pose."""
+        report = {'checks': {}}
+        checks = report['checks']
+
+        async def check(name, fn):
+            try:
+                checks[name] = {'ok': True, **((await fn()) or {})}
+            except Exception as e:
+                checks[name] = {'ok': False, 'error': f'{type(e).__name__}: {e}'}
+
+        async def kinematics():
+            await self.preflight()
+            q = await self.joints()
+            return {'joints_deg': q, 'min_limit_clearance_deg': round(self.kin.limit_clearance_deg(q), 3),
+                    'at_overview': max(abs(a-b) for a, b in zip(q, self.s.overview_joints_deg)) <= .25}
+
+        async def camera():
+            obs = await self.capture(require_ring=False)
+            props = obs.get('camera_intrinsics')
+            same = props == self.s.calibration.get('camera_intrinsics')
+            return {'intrinsics_match_calibration': same, 'cube_count': obs.get('cube_count'),
+                    'ring_count': obs.get('ring_count'), 'issues': obs.get('issues', [])}
+
+        async def reset_plan():
+            plans = await Planner(self.motion, self.s, self.kin).plan_reset(await self.joints())
+            return {'stages': [(name, len(path)) for name, path, _ in plans]}
+
+        self.event('self_test')
+        await check('preflight_and_kinematics', kinematics)
+        await check('camera', camera)
+        if self.kin is not None:
+            await check('reset_plan', reset_plan)
+        report['ok'] = all(c['ok'] for c in checks.values())
+        report['goals'] = self.s.goals
+        self.event('self_test_done', ok=report['ok'])
+        return report
 
     async def dry_run(self, goal):
         """Detect and plan at the overview without moving anything."""

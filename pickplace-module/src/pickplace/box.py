@@ -29,18 +29,24 @@ def check_cube_fits(box, cube_size, center_xy, world_yaw):
     return remaining.tolist()
 
 
-def cavity_geometry(box, wall_mm=30.0):
-    """[(label, center_xyz, dims_xyz, yaw_deg)]: a floor slab and four wall prisms."""
+def cavity_geometry(box, name='box', wall_mm=30.0):
+    """[(label, center_xyz, dims_xyz, yaw_deg)]: a floor slab and four wall prisms.
+
+    Labels are floor_label(name) and goal-<name>-wall-<i>, unique per box."""
     c = np.asarray(box['floor_center_world_mm'], float)
     R = _rotation(box['world_yaw_deg'])
     width, length = box['inner_dimensions_mm']
     height = box['rim_z_mm']-c[2]
-    result = [('goal-box-floor', [*c[:2], c[2]-10], [width+2*wall_mm, length+2*wall_mm, 20], box['world_yaw_deg'])]
+    result = [(floor_label(name), [*c[:2], c[2]-10], [width+2*wall_mm, length+2*wall_mm, 20], box['world_yaw_deg'])]
     walls = [([-width/2-wall_mm/2, 0], [wall_mm, length+2*wall_mm, height]),
              ([width/2+wall_mm/2, 0], [wall_mm, length+2*wall_mm, height]),
              ([0, -length/2-wall_mm/2], [width, wall_mm, height]),
              ([0, length/2+wall_mm/2], [width, wall_mm, height])]
     for i, (offset, dims) in enumerate(walls):
         xy = c[:2]+R @ offset
-        result.append(('goal-box-wall-'+str(i), [*xy, c[2]+height/2], dims, box['world_yaw_deg']))
+        result.append((f'goal-{name}-wall-{i}', [*xy, c[2]+height/2], dims, box['world_yaw_deg']))
     return result
+
+
+def floor_label(name):
+    return f'goal-{name}-floor'
