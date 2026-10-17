@@ -3,222 +3,400 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>armfarm19 test bench</title>
+<title>Ultraviolet Bench</title>
 <style>
-  :root { --bg:#f6f7f9; --panel:#fff; --ink:#1b1f24; --muted:#5b6470; --line:#dde1e6; --accent:#2257d6;
-          --warn:#b4231b; --ok:#1d7a3a; --code:#f0f2f5; }
-  @media (prefers-color-scheme: dark) {
-    :root { --bg:#111418; --panel:#191d22; --ink:#e6e9ed; --muted:#9aa3ad; --line:#2a3038; --accent:#6f9bff;
-            --warn:#ff7b72; --ok:#56d364; --code:#0d1014; } }
+  :root {
+    --bg:#0d0915; --panel:#181127; --panel2:#1f1633; --line:#2f2347; --ink:#ede7f8; --muted:#a597c2;
+    --violet:#57068c; --uv:#8f5bff; --uv2:#c4a6ff; --glow:rgba(143,91,255,.35);
+    --ok:#3ddc97; --warn:#ffb547; --bad:#ff5d7a; --code:#0f0a19;
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) { --bg:#f5f1fb; --panel:#ffffff; --panel2:#f7f3fd; --line:#ddd2ee; --ink:#1d1430;
+      --muted:#6b5c88; --uv:#6a2cd8; --uv2:#57068c; --glow:rgba(106,44,216,.18); --code:#f4effb; }
+  }
+  :root[data-theme="light"] { --bg:#f5f1fb; --panel:#ffffff; --panel2:#f7f3fd; --line:#ddd2ee; --ink:#1d1430;
+      --muted:#6b5c88; --uv:#6a2cd8; --uv2:#57068c; --glow:rgba(106,44,216,.18); --code:#f4effb; }
   * { box-sizing:border-box; }
-  body { margin:0; font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif; background:var(--bg); color:var(--ink); }
-  header { display:flex; flex-wrap:wrap; gap:12px; align-items:center; padding:12px 16px; border-bottom:1px solid var(--line);
-           background:var(--panel); position:sticky; top:0; z-index:2; }
-  header h1 { font-size:16px; margin:0 12px 0 0; }
-  .pill { padding:2px 8px; border-radius:999px; border:1px solid var(--line); color:var(--muted); font-size:12px; }
-  .pill.busy { color:var(--accent); border-color:var(--accent); } .pill.err { color:var(--warn); border-color:var(--warn); }
-  main { display:grid; gap:16px; padding:16px; grid-template-columns:repeat(auto-fit,minmax(340px,1fr)); }
-  section { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px; min-width:0; }
-  h2 { font-size:13px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); margin:0 0 10px; }
-  button { font:inherit; padding:6px 10px; border-radius:7px; border:1px solid var(--line); background:var(--bg);
-           color:var(--ink); cursor:pointer; }
-  button:hover { border-color:var(--accent); } button.move { border-color:var(--accent); color:var(--accent); }
-  button.stop { background:var(--warn); color:#fff; border-color:var(--warn); font-weight:600; }
-  .row { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin:6px 0; }
-  select,input[type=text],input[type=number] { font:inherit; padding:5px 7px; border-radius:6px; border:1px solid var(--line);
-           background:var(--bg); color:var(--ink); }
-  input[type=number] { width:70px; }
-  textarea { width:100%; min-height:110px; font:12px/1.4 ui-monospace,Menlo,monospace; background:var(--code); color:var(--ink);
-             border:1px solid var(--line); border-radius:6px; padding:8px; }
-  pre { background:var(--code); border-radius:6px; padding:8px; margin:6px 0 0; font:12px/1.4 ui-monospace,Menlo,monospace;
-        max-height:320px; overflow:auto; white-space:pre-wrap; word-break:break-word; }
-  table { border-collapse:collapse; width:100%; font-variant-numeric:tabular-nums; }
-  td,th { padding:3px 4px; border-bottom:1px solid var(--line); text-align:left; }
-  img { width:100%; border-radius:6px; background:var(--code); min-height:120px; }
-  label.clear { font-weight:600; } .muted { color:var(--muted); font-size:12px; } .wide { grid-column:1/-1; }
+  body { margin:0; font:14px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif; color:var(--ink);
+    background:radial-gradient(1200px 500px at 85% -10%, var(--glow), transparent 60%), var(--bg); min-height:100vh; }
+  header { position:sticky; top:0; z-index:5; display:flex; flex-wrap:wrap; align-items:center; gap:10px 14px;
+    padding:12px 18px; background:linear-gradient(90deg, var(--violet), #3a0560 60%, #24063d); color:#fff;
+    box-shadow:0 2px 18px var(--glow); }
+  .brand { display:flex; align-items:baseline; gap:10px; margin-right:auto; }
+  .brand b { font-size:18px; letter-spacing:.18em; } .brand span { opacity:.75; font-size:12px; letter-spacing:.06em; }
+  .chip { font-size:12px; padding:3px 9px; border-radius:999px; background:rgba(255,255,255,.12); border:1px solid rgba(255,255,255,.22); white-space:nowrap; }
+  .chip.busy { background:#8f5bff; border-color:#c4a6ff; } .chip.bad { background:#a3123a; border-color:#ff8fa6; } .chip.warn { background:#8a5a00; }
+  .clear { display:flex; gap:6px; align-items:center; font-weight:600; font-size:13px; }
+  .clear input { width:18px; height:18px; accent-color:#ffb547; }
+  button { font:inherit; font-size:13px; padding:7px 12px; border-radius:9px; border:1px solid var(--line);
+    background:var(--panel2); color:var(--ink); cursor:pointer; transition:border-color .12s, box-shadow .12s; }
+  button:hover { border-color:var(--uv); box-shadow:0 0 0 3px var(--glow); }
+  button.primary { background:var(--uv); border-color:var(--uv); color:#fff; }
+  button.move { border-color:var(--warn); } button.move::before { content:"⚠ "; color:var(--warn); }
+  button.primary.move::before { color:#fff; }
+  button.stop { background:#e11d48; border-color:#ff8fa6; color:#fff; font-weight:700; letter-spacing:.08em; padding:8px 16px; }
+  button.ghost { background:transparent; }
+  nav { display:flex; gap:4px; padding:10px 18px 0; flex-wrap:wrap; }
+  nav button { border-radius:10px 10px 0 0; border-bottom:none; background:transparent; color:var(--muted); }
+  nav button.on { background:var(--panel); color:var(--ink); border-color:var(--line); box-shadow:inset 0 3px 0 var(--uv); }
+  main { padding:0 18px 28px; }
+  .tab { display:none; gap:14px; grid-template-columns:repeat(auto-fit,minmax(330px,1fr)); padding-top:14px;
+    border-top:1px solid var(--line); } .tab.on { display:grid; }
+  section { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:14px 16px; min-width:0; }
+  section.wide { grid-column:1/-1; }
+  h2 { margin:0 0 10px; font-size:12px; letter-spacing:.12em; text-transform:uppercase; color:var(--uv2); }
+  .row { display:flex; flex-wrap:wrap; gap:7px; align-items:center; margin:7px 0; }
+  .muted { color:var(--muted); font-size:12px; }
+  input[type=text],input[type=number],select { font:inherit; padding:6px 8px; border-radius:8px; border:1px solid var(--line);
+    background:var(--code); color:var(--ink); }
+  input[type=number] { width:86px; }
+  textarea { width:100%; min-height:110px; font:12px/1.45 ui-monospace,Menlo,monospace; background:var(--code); color:var(--ink);
+    border:1px solid var(--line); border-radius:9px; padding:9px; }
+  pre { margin:8px 0 0; background:var(--code); border:1px solid var(--line); border-radius:9px; padding:9px;
+    font:12px/1.45 ui-monospace,Menlo,monospace; max-height:340px; overflow:auto; white-space:pre-wrap; word-break:break-word; }
+  table { width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums; }
+  th,td { text-align:left; padding:5px 6px; border-bottom:1px solid var(--line); }
+  th { color:var(--muted); font-weight:500; font-size:12px; }
+  .bar { height:6px; border-radius:3px; background:var(--line); overflow:hidden; min-width:70px; }
+  .bar i { display:block; height:100%; background:var(--ok); } .bar i.warn { background:var(--warn); } .bar i.bad { background:var(--bad); }
+  img.cam { width:100%; border-radius:10px; background:var(--code); min-height:160px; border:1px solid var(--line); }
+  .kv { display:grid; grid-template-columns:auto 1fr; gap:3px 12px; font-size:13px; } .kv span:nth-child(odd) { color:var(--muted); }
+  .pill-ok { color:var(--ok); } .pill-bad { color:var(--bad); } .pill-warn { color:var(--warn); }
+  .events li { margin:2px 0; font:12px ui-monospace,Menlo,monospace; } .events { padding-left:18px; max-height:260px; overflow:auto; }
+  #toast { position:fixed; right:16px; bottom:16px; max-width:min(560px,90vw); background:var(--panel2); border:1px solid var(--uv);
+    border-radius:12px; padding:10px 14px; box-shadow:0 6px 30px var(--glow); display:none; font-size:13px; z-index:9;
+    white-space:pre-wrap; word-break:break-word; }
+  @media (max-width:600px) { header { padding:10px 12px; } main, nav { padding-left:12px; padding-right:12px; } }
 </style>
 </head>
 <body>
 <header>
-  <h1>armfarm19 test bench</h1>
-  <span id="state" class="pill">connecting…</span>
-  <span id="stage" class="pill">stage —</span>
-  <label class="clear"><input type="checkbox" id="clear"> workcell clear (enables motion)</label>
+  <div class="brand"><b>ULTRAVIOLET</b><span>NYU · armfarm19 test bench</span></div>
+  <span id="c-state" class="chip">connecting…</span>
+  <span id="c-stage" class="chip">stage —</span>
+  <span id="c-impl" class="chip">code-2 —</span>
+  <span id="c-limit" class="chip">limits —</span>
+  <label class="clear"><input type="checkbox" id="clear"> workcell clear</label>
   <button class="stop" onclick="stopAll()">STOP</button>
-  <span class="muted">Software stop only — keep the physical e-stop in reach.</span>
+  <button class="ghost" style="color:#fff" onclick="toggleTheme()" title="light / dark">◐</button>
 </header>
+<nav id="tabs"></nav>
 <main>
+<!-- RUN -->
+<div class="tab" data-tab="Run">
   <section>
     <h2>Pick &amp; place</h2>
-    <div class="row">Pick cube
-      <select id="select"><option>only</option><option>left</option><option>right</option><option>nearest</option><option>farthest</option></select>
-      place on <select id="place"><option value="ring">ring</option></select></div>
-    <div class="row">
-      <button onclick="send(task('dry_run'))">Dry run (no motion)</button>
-      <button class="move" onclick="send(task('pick_place'), true)">Pick &amp; place</button></div>
-    <div class="row">
-      <button onclick="send({action:'describe'})">describe</button>
-      <button onclick="send({action:'status'})">status</button>
-      <button onclick="send({action:'self_test'})">self_test</button>
-      <button onclick="send({action:'release'})">release suction</button></div>
-    <div class="row">
-      <button class="move" onclick="send({action:'reset'}, true)">reset → overview</button>
-      <button class="move" onclick="send({action:'recover_limits'}, true)">recover_limits</button></div>
-    <div class="row">New box name <input type="text" id="boxname" value="box2" size="10">
-      <button onclick="send({action:'measure_box', name:val('boxname')})">measure_box (no motion)</button></div>
-    <p class="muted">Results arrive in <b>status → last_result</b>; long commands return immediately.</p>
+    <div class="row">cube <select id="select"><option>only</option><option>left</option><option>right</option><option>nearest</option><option>farthest</option></select>
+      → <select id="place"><option value="ring">ring</option></select></div>
+    <div class="row"><button onclick="cmd(task('dry_run'))">Dry run · no motion</button>
+      <button class="move primary" onclick="cmd(task('pick_place'), true)">Pick &amp; place</button></div>
+    <div class="row"><button class="move" onclick="cmd({action:'ring_once'}, true)">ring_once</button>
+      <button class="move" onclick="cmd({action:'box_once'}, true)">box_once</button></div>
+    <p class="muted">Dry run needs the arm at the overview. Results land in <b>Outcome</b>.</p>
   </section>
-
   <section>
-    <h2>Say it (plain language → command)</h2>
-    <div class="row"><input type="text" id="nltext" style="flex:1" value="can you put the left cube in the orange box">
+    <h2>Robot routine</h2>
+    <div class="row"><button onclick="cmd({action:'self_test'})">self_test</button>
+      <button onclick="cmd({action:'status'})">status</button>
+      <button onclick="cmd({action:'describe'})">describe</button>
+      <button onclick="cmd({action:'release'})">suction off</button></div>
+    <div class="row"><button class="move" onclick="cmd({action:'reset'}, true)">reset → overview</button>
+      <button class="move" onclick="cmd({action:'recover_limits'}, true)">recover_limits</button>
+      <button onclick="armdo('clear_error')">clear controller error</button></div>
+    <p class="muted">After an e-stop: release it at the robot → clear controller error → recover_limits (if a joint is at its limit) → reset → self_test.</p>
+  </section>
+  <section>
+    <h2>Say it</h2>
+    <div class="row"><input type="text" id="nltext" style="flex:1" value="put the left cube in the orange box">
       <button onclick="nlParse()">Parse</button></div>
-    <div class="row muted" id="nlexplain">Parsed commands land in the raw box; review, then Send.</div>
+    <div class="muted" id="nlexplain">Parsed commands appear in the raw box below for review before sending.</div>
   </section>
-
   <section>
-    <h2>Raw DoCommand (exactly what the web app sends)</h2>
+    <h2>Outcome</h2>
+    <div class="kv" id="outcome"><span>last request</span><span>—</span></div>
+    <pre id="lastresult">—</pre>
+  </section>
+  <section class="wide">
+    <h2>Raw DoCommand → code-2</h2>
     <textarea id="raw">{"action": "pick_place", "pick": {"object": "cube", "select": "left"}, "place": {"color": "orange"}, "workcell_ready": true}</textarea>
-    <div class="row"><button onclick="sendRaw()">Send to code-2</button></div>
+    <div class="row"><button class="primary" onclick="sendRaw()">Send</button><span class="muted">exactly what a web app sends via GenericService.DoCommand</span></div>
     <pre id="reply">—</pre>
   </section>
-
-  <section>
-    <h2>Camera (cam)</h2>
-    <img id="cam" alt="wrist camera">
-    <div class="row"><button onclick="snap()">Refresh</button>
-      <label><input type="checkbox" id="live"> live (1 fps)</label></div>
+  <section class="wide">
+    <h2>Event timeline</h2>
+    <ol class="events" id="events"></ol>
   </section>
+</div>
 
-  <section>
-    <h2>Arm</h2>
-    <table id="joints"><tr><th>Joint</th><th>deg</th><th>jog</th></tr></table>
-    <div class="row">step <input type="number" id="step" value="2" min="0.1" max="10" step="0.1"> deg
-      speed <input type="number" id="speed" value="2" min="0.5" max="5" step="0.5"> deg/s</div>
-    <div class="row muted" id="tcp">TCP —</div>
-    <p class="muted">Jogs are direct joint moves without collision checking. Refused while code-2 is busy.</p>
+<!-- VISION -->
+<div class="tab" data-tab="Vision">
+  <section class="wide">
+    <h2>Wrist camera</h2>
+    <div class="row"><button onclick="snap()">Snapshot</button>
+      <label><input type="checkbox" id="overlay" checked> detection overlay</label>
+      <label><input type="checkbox" id="live"> live (1 fps)</label>
+      <span class="muted">The overlay shows 2D detections (cube corner marks, ring). Targets also need the calibrated overview pose.</span></div>
+    <img class="cam" id="cam" alt="wrist camera">
   </section>
-
   <section>
-    <h2>Gripper (vacuum)</h2>
-    <div class="row"><button class="move" onclick="grip('grab')">Suction on</button>
-      <button onclick="grip('open')">Suction off</button></div>
-    <p class="muted">Open loop: code-2 never reads "holding".</p>
-    <div class="row">Vacuum reading via wiring:
-      <button onclick="armdo('get_vacuum_state','contact')">contact</button>
-      <button onclick="armdo('get_vacuum_state','plugin')">plugin</button></div>
-    <p class="muted">Diagnose the feedback: with suction on and a cube sealed, one wiring mode should read true.
-      The driver auto-selects "contact" on this arm; if only "plugin" reads correctly, set the gripper's connection_type.</p>
+    <h2>Measure a new box</h2>
+    <div class="row">name <input type="text" id="boxname" value="box2" size="10">
+      colour <input type="text" id="boxcolor" value="orange" size="8">
+      <button onclick="cmd({action:'measure_box', name:val('boxname')})">measure_box · no motion</button></div>
+    <div class="row"><button onclick="addCandidate(false)">Validate candidate</button>
+      <button class="move" onclick="addCandidate(true)">Add candidate to config</button></div>
+    <pre id="candidate">Run measure_box at the overview; the candidate appears here.</pre>
   </section>
+</div>
 
+<!-- ARM -->
+<div class="tab" data-tab="Arm">
+  <section>
+    <h2>Joints</h2>
+    <table id="joints"><tr><th>joint</th><th>deg</th><th>limit clearance</th><th>jog</th></tr></table>
+    <div class="row">step <input type="number" id="step" value="2" min="0.1" max="10" step="0.1"> °
+      speed <input type="number" id="speed" value="2" min="0.5" max="5" step="0.5"> °/s
+      <button onclick="api('/api/arm/stop',{}).then(r=>toast(r)).catch(e=>toast(e.message,true))">stop arm</button></div>
+    <div class="muted" id="tcp">TCP —</div>
+    <p class="muted">Jogs are direct joint moves without collision checking (≤ 10°, ≤ 5°/s), refused while code-2 is busy.</p>
+  </section>
+  <section>
+    <h2>Suction</h2>
+    <div class="row"><button class="move" onclick="grip('grab')">suction on</button><button onclick="grip('open')">suction off</button></div>
+    <h2 style="margin-top:14px">Vacuum feedback wiring test</h2>
+    <div class="row"><button onclick="armdo('get_vacuum_state','contact')">read as contact</button>
+      <button onclick="armdo('get_vacuum_state','plugin')">read as plugin</button></div>
+    <p class="muted">With suction on and a cube sealed, the correct wiring reads true. The driver assumes “contact” on this arm; if only “plugin” works, set the gripper’s connection_type. code-2 never relies on this reading.</p>
+  </section>
   <section>
     <h2>xArm controller</h2>
-    <div class="row"><button onclick="armdo('get_state')">get_state</button>
-      <button onclick="armdo('get_error')">get_error</button>
+    <div class="row"><button onclick="armdo('get_state')">get_state</button><button onclick="armdo('get_error')">get_error</button>
       <button onclick="armdo('clear_error')">clear_error</button></div>
-    <p class="muted">After releasing the e-stop: clear_error, then code-2 recover_limits (if a joint is at its limit), then reset.</p>
+    <pre id="armreply">—</pre>
   </section>
+</div>
 
-  <section class="wide">
-    <h2>code-2 config</h2>
-    <div class="row"><button onclick="loadConfig()">Load from machine</button>
-      <button onclick="saveConfig(false)">Validate</button>
-      <button class="move" onclick="saveConfig(true)">Apply to machine</button>
-      <span class="muted" id="cfgnote"></span></div>
-    <textarea id="config" style="min-height:260px"></textarea>
+<!-- CONFIG -->
+<div class="tab" data-tab="Config">
+  <section>
+    <h2>Tuning</h2>
+    <table id="tuning"></table>
+    <div class="row"><button onclick="saveTuning(false)">Validate</button><button class="primary" onclick="saveTuning(true)">Apply to robot</button>
+      <span class="muted" id="tunenote"></span></div>
+    <p class="muted">Blank = module default (shown greyed). Applying restarts code-2 and is refused while it is busy.</p>
   </section>
+  <section>
+    <h2>Boxes</h2>
+    <table id="boxes"></table>
+    <p class="muted">Gap / side = clearance (long / short axis) for the cube placed square at the box's goal; under 3 mm is very tight (see GEOMETRY.md §5).
+      Add boxes from the Vision tab (measure_box). Each box is both a goal and a collision obstacle.</p>
+  </section>
+  <section class="wide">
+    <h2>Raw attributes (advanced)</h2>
+    <div class="row"><button onclick="loadConfig()">Reload from robot</button><button onclick="saveRaw(false)">Validate</button>
+      <button class="primary" onclick="saveRaw(true)">Apply</button><span class="muted" id="cfgnote"></span></div>
+    <textarea id="config" style="min-height:280px"></textarea>
+  </section>
+</div>
 
-  <section class="wide">
-    <h2>Status</h2>
-    <pre id="status">—</pre>
+<!-- PLAN -->
+<div class="tab" data-tab="Plan">
+  <section>
+    <h2>Live plan check · plan only</h2>
+    <div class="row">goal <select id="pc-goal"><option>box</option><option>ring</option></select>
+      frame <select id="pc-frame"><option>0</option><option>1</option><option>2</option></select>
+      start <select id="pc-start"><option value="overview">overview</option><option value="current">current pose</option></select></div>
+    <div class="row">ring what-if x <input type="number" id="pc-rx" placeholder="—"> y <input type="number" id="pc-ry" placeholder="—"></div>
+    <div class="row"><button class="primary" onclick="planCheck()">Plan every stage</button><span class="muted" id="pcnote"></span></div>
+    <p class="muted">Uses the robot's real planner and obstacles with a saved overview frame. It sends only plan requests, so nothing moves.</p>
   </section>
+  <section>
+    <h2>Stages</h2>
+    <table id="pc-table"><tr><td class="muted">Run a plan check.</td></tr></table>
+    <pre id="pc-summary">—</pre>
+  </section>
+</div>
+
+<!-- OPS -->
+<div class="tab" data-tab="Ops">
+  <section>
+    <h2>Module versions</h2>
+    <div class="kv"><span>running</span><span id="v-current">—</span></div>
+    <table id="builds"></table>
+    <div class="row"><button onclick="loadVersions()">Refresh</button></div>
+  </section>
+  <section>
+    <h2>Build &amp; deploy</h2>
+    <div class="row">new version <input type="text" id="newversion" placeholder="0.0.31" size="8">
+      <button onclick="deployNew()">Upload + cloud build</button></div>
+    <p class="muted">Uploads this checkout's pickplace-module and starts a linux/amd64 build. Once its status is Done, select it in Module versions.</p>
+  </section>
+  <section class="wide">
+    <h2>Robot logs</h2>
+    <div class="row">filter <input type="text" id="logfilter" value="pickplace" size="14">
+      lines <input type="number" id="logn" value="60"> <button onclick="loadLogs()">Fetch</button></div>
+    <pre id="logs">—</pre>
+  </section>
+</div>
 </main>
+<div id="toast"></div>
 <script>
 const $ = id => document.getElementById(id), val = id => $(id).value;
-const show = (el, data) => $(el).textContent = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+const pretty = d => typeof d === 'string' ? d : JSON.stringify(d, null, 2);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const LIMITS = [[-360,360],[-118,120],[-225,11],[-360,360],[-97,180],[-360,360]];
+let lastStatus = {}, config = null;
+function toast(d, bad) { const t = $('toast'); t.textContent = typeof d === 'string' ? d : pretty(d).slice(0, 700);
+  t.style.borderColor = bad ? 'var(--bad)' : 'var(--uv)'; t.style.display = 'block'; clearTimeout(t._h); t._h = setTimeout(() => t.style.display = 'none', 7000); }
 async function api(path, body) {
   const r = await fetch(path, body === undefined ? {} : {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
-  const data = await r.json().catch(() => ({error: r.statusText}));
-  if (!r.ok) throw new Error(data.error || r.statusText);
-  return data;
+  const d = await r.json().catch(() => ({error: r.statusText}));
+  if (!r.ok) throw new Error(d.error || r.statusText);
+  return d;
 }
-function task(action) {
-  return {action, pick:{object:'cube', select:val('select')}, place:{goal:val('place')}};
-}
-async function send(cmd, moves) {
-  if (moves) {
-    if (!$('clear').checked) { show('reply', 'Tick "workcell clear" first.'); return; }
-    cmd.workcell_ready = true; cmd.request_id = 'bench-' + Date.now();
-  }
-  $('raw').value = JSON.stringify(cmd);
-  try { show('reply', await api('/api/command', cmd)); } catch (e) { show('reply', 'Error: ' + e.message); }
+function needClear() { if (!$('clear').checked) { toast('Tick "workcell clear" first (this moves the arm or switches suction on).', true); return true; } return false; }
+// ---- tabs / theme
+const TABS = [...document.querySelectorAll('.tab')].map(t => t.dataset.tab);
+function show(name) { document.querySelectorAll('.tab').forEach(t => t.classList.toggle('on', t.dataset.tab === name));
+  [...$('tabs').children].forEach(b => b.classList.toggle('on', b.textContent === name)); try { localStorage.setItem('uv-tab', name); } catch (e) {}
+  if (name === 'Config') loadConfig(); if (name === 'Ops') loadVersions(); if (name === 'Vision') snap(); }
+$('tabs').innerHTML = TABS.map(t => `<button onclick="show('${t}')">${t}</button>`).join('');
+function toggleTheme() { const r = document.documentElement; r.dataset.theme = r.dataset.theme === 'light' ? 'dark' : 'light'; }
+// ---- commands
+function task(action) { return {action, pick:{object:'cube', select:val('select')}, place:{goal:val('place')}}; }
+async function cmd(c, moves) {
+  if (moves) { if (needClear()) return; c.workcell_ready = true; c.request_id = 'bench-' + Date.now(); }
+  $('raw').value = JSON.stringify(c);
+  try { const r = await api('/api/command', c); $('reply').textContent = pretty(r); toast(r.accepted ? `accepted: ${c.action}` : (r.error || 'done')); }
+  catch (e) { $('reply').textContent = 'Error: ' + e.message; toast(e.message, true); }
 }
 async function sendRaw() {
-  let cmd; try { cmd = JSON.parse(val('raw')); } catch (e) { show('reply', 'Invalid JSON: ' + e.message); return; }
-  if (cmd.workcell_ready && !$('clear').checked) { show('reply', 'Tick "workcell clear" first.'); return; }
-  try { show('reply', await api('/api/command', cmd)); } catch (e) { show('reply', 'Error: ' + e.message); }
+  let c; try { c = JSON.parse(val('raw')); } catch (e) { toast('Invalid JSON: ' + e.message, true); return; }
+  if (c.workcell_ready && needClear()) return;
+  try { $('reply').textContent = pretty(await api('/api/command', c)); } catch (e) { $('reply').textContent = 'Error: ' + e.message; }
 }
+async function stopAll() { try { await api('/api/command', {action:'stop'}); } catch (e) {} try { await api('/api/arm/stop', {}); toast('Stop sent'); } catch (e) { toast('Stop error: ' + e.message, true); } }
 async function nlParse() {
-  try {
-    const r = await api('/api/nl', {text: val('nltext')});
-    const cmd = r.command;
-    if (r.moves) { cmd.workcell_ready = true; cmd.request_id = 'nl-' + Date.now(); }
-    $('raw').value = JSON.stringify(cmd, null, 1);
-    $('nlexplain').textContent = r.explanation + (r.moves ? ' — MOVES the arm: tick "workcell clear" then Send.' : ' — no motion.');
+  try { const r = await api('/api/nl', {text: val('nltext')}); const c = r.command;
+    if (r.moves) { c.workcell_ready = true; c.request_id = 'nl-' + Date.now(); }
+    $('raw').value = JSON.stringify(c, null, 1);
+    $('nlexplain').textContent = r.explanation + (r.moves ? ' — moves the arm: tick workcell clear, then Send.' : ' — no motion.');
   } catch (e) { $('nlexplain').textContent = 'Not understood: ' + e.message; }
 }
-async function stopAll() {
-  try { await api('/api/command', {action:'stop'}); } catch (e) {}
-  try { show('reply', await api('/api/arm/stop', {})); } catch (e) { show('reply', 'Stop error: ' + e.message); }
-}
-async function jog(joint, sign) {
-  if (!$('clear').checked) { show('reply', 'Tick "workcell clear" first.'); return; }
-  try { show('reply', await api('/api/arm/jog', {joint, delta_deg: sign * parseFloat(val('step')),
-        speed_deg_s: parseFloat(val('speed')), workcell_ready:true})); } catch (e) { show('reply', 'Jog error: ' + e.message); }
-}
-async function grip(action) {
-  if (action === 'grab' && !$('clear').checked) { show('reply', 'Tick "workcell clear" first.'); return; }
-  try { show('reply', await api('/api/gripper', {action})); } catch (e) { show('reply', 'Gripper error: ' + e.message); }
-}
 async function armdo(command, connection_type) {
-  try { show('reply', await api('/api/arm/do', {command, connection_type})); } catch (e) { show('reply', 'Arm error: ' + e.message); }
+  try { const r = await api('/api/arm/do', {command, connection_type}); $('armreply').textContent = pretty(r); toast(r); }
+  catch (e) { $('armreply').textContent = 'Error: ' + e.message; toast(e.message, true); }
 }
-function snap() { $('cam').src = '/api/camera?t=' + Date.now(); }
+async function grip(action) { if (action === 'grab' && needClear()) return;
+  try { toast(await api('/api/gripper', {action, workcell_ready:true})); } catch (e) { toast(e.message, true); } }
+async function jog(joint, sign) { if (needClear()) return;
+  try { await api('/api/arm/jog', {joint, delta_deg: sign * parseFloat(val('step')), speed_deg_s: parseFloat(val('speed')), workcell_ready:true}); }
+  catch (e) { toast('Jog: ' + e.message, true); } }
+// ---- vision
+function snap() { $('cam').src = '/api/camera?overlay=' + ($('overlay').checked ? 1 : 0) + '&t=' + Date.now(); }
+async function addCandidate(apply) {
+  const cand = lastStatus.last_result && lastStatus.last_result.candidate;
+  if (!cand) { toast('No candidate yet: run measure_box first.', true); return; }
+  const entry = {...cand, name: val('boxname'), color: val('boxcolor') || 'orange'};
+  if (apply && !confirm(`Add box "${entry.name}" to the robot config? code-2 restarts.`)) return;
+  try { toast(await api('/api/config/boxes', {entry, apply})); if (apply) loadConfig(); } catch (e) { toast(e.message, true); }
+}
+// ---- config
 async function loadConfig() {
-  try { const c = await api('/api/config'); $('config').value = JSON.stringify(c.attributes, null, 2);
-        $('cfgnote').textContent = 'module version ' + c.version; } catch (e) { $('cfgnote').textContent = e.message; }
+  try { config = await api('/api/config'); $('config').value = pretty(config.attributes); $('cfgnote').textContent = 'module ' + config.version;
+    $('tuning').innerHTML = '<tr><th>key</th><th>value</th></tr>' + Object.entries(config.effective).map(([k, v]) =>
+      `<tr><td>${k}</td><td>${k === 'default_goal' ? `<select data-k="${k}">${['ring', ...Object.keys(config.boxes)].map(g => `<option ${g === v ? 'selected' : ''}>${esc(g)}</option>`).join('')}</select>`
+        : `<input type="number" step="any" data-k="${k}" value="${config.attributes[k] ?? ''}" placeholder="${v}">`}</td></tr>`).join('');
+    $('boxes').innerHTML = '<tr><th>name</th><th>colour</th><th>opening mm</th><th>rim z</th><th>gap / side</th><th></th></tr>' + Object.entries(config.boxes).map(([n, b]) => {
+      const fit = config.box_fit_mm[n], tight = Array.isArray(fit) && Math.min(...fit) < 3;
+      return `<tr><td>${esc(n)}</td><td>${esc(b.color || '')}</td><td>${b.inner_dimensions_mm.map(x => x.toFixed(0)).join(' × ')}</td><td>${b.rim_z_mm.toFixed(0)}</td>
+       <td class="${Array.isArray(fit) ? (tight ? 'pill-warn' : 'pill-ok') : 'pill-bad'}">${Array.isArray(fit) ? fit.map(g => g.toFixed(1)).join(' / ') : esc(fit)}</td>
+       <td>${b.placement_center_xy_mm ? `<button onclick="centreBox('${esc(n)}')" title="use the measured floor centre">centre</button> ` : ''}<button onclick="removeBox('${esc(n)}')">remove</button></td></tr>`; }).join('');
+  } catch (e) { $('cfgnote').textContent = e.message; }
 }
-async function saveConfig(apply) {
+async function saveTuning(apply) {
+  const changes = {}; document.querySelectorAll('#tuning [data-k]').forEach(i => { const k = i.dataset.k;
+    if (k === 'default_goal' ? i.value !== config.effective[k] : (i.value !== String(config.attributes[k] ?? ''))) changes[k] = i.value; });
+  if (!Object.keys(changes).length) { $('tunenote').textContent = 'No changes.'; return; }
+  if (apply && !confirm('Apply ' + JSON.stringify(changes) + ' to the robot? code-2 restarts.')) return;
+  try { await api('/api/config/tuning', {changes, apply}); $('tunenote').textContent = (apply ? 'Applied ' : 'Valid: ') + JSON.stringify(changes); if (apply) loadConfig(); }
+  catch (e) { $('tunenote').textContent = e.message; }
+}
+async function centreBox(name) { if (!confirm(`Place into "${name}" at its measured floor centre instead of the stored placement point?`)) return;
+  try { toast(await api('/api/config/boxes', {centre: name, apply: true})); loadConfig(); } catch (e) { toast(e.message, true); } }
+async function removeBox(name) { if (!confirm(`Remove box "${name}" from the robot config?`)) return;
+  try { toast(await api('/api/config/boxes', {remove: name, apply: true})); loadConfig(); } catch (e) { toast(e.message, true); } }
+async function saveRaw(apply) {
   let attributes; try { attributes = JSON.parse(val('config')); } catch (e) { $('cfgnote').textContent = 'Invalid JSON: ' + e.message; return; }
-  if (apply && !confirm('Replace code-2 attributes on the machine? code-2 will restart.')) return;
-  try { const r = await api('/api/config', {attributes, apply}); $('cfgnote').textContent = JSON.stringify(r); }
-  catch (e) { $('cfgnote').textContent = e.message; }
+  if (apply && !confirm('Replace code-2 attributes on the robot? code-2 restarts.')) return;
+  try { $('cfgnote').textContent = JSON.stringify(await api('/api/config', {attributes, apply})); } catch (e) { $('cfgnote').textContent = e.message; }
 }
-async function describe() {
-  try {
-    const d = await api('/api/command', {action:'describe'});
-    $('place').innerHTML = d.place.goals.map(g => `<option value="${g.name}">${g.name}${g.color ? ' (' + g.color + ')' : ''}</option>`).join('');
+// ---- plan check
+async function planCheck() {
+  const body = {goal: val('pc-goal'), frame: +val('pc-frame'), start: val('pc-start')};
+  if (val('pc-rx') && val('pc-ry')) body.ring_world_xy = [+val('pc-rx'), +val('pc-ry')];
+  $('pcnote').textContent = 'planning… (30–60 s)';
+  try { const r = await api('/api/plan_check', body);
+    $('pcnote').textContent = r.ok ? 'all stages planned' : 'failed';
+    $('pc-table').innerHTML = r.ok ? '<tr><th>stage</th><th>nodes</th><th>°/s</th><th>J4 range</th></tr>' + r.stages.map(s =>
+      `<tr><td>${s.name}</td><td>${s.nodes}</td><td>${s.speed_deg_s}</td><td>${s.j4_range_deg.join(' … ')}</td></tr>`).join('') : `<tr><td class="pill-bad">${esc(r.error)}</td></tr>`;
+    $('pc-summary').textContent = pretty(r.ok ? r.summary : r);
+  } catch (e) { $('pcnote').textContent = e.message; }
+}
+// ---- ops
+async function loadVersions() {
+  try { const v = await api('/api/versions'); $('v-current').textContent = v.current;
+    $('builds').innerHTML = '<tr><th>version</th><th>status</th><th>built (UTC)</th><th></th></tr>' + v.builds.map(b =>
+      `<tr><td>${b.version}</td><td class="${b.status === 'Done' ? 'pill-ok' : 'pill-warn'}">${b.status}</td><td class="muted">${b.time.replace('T',' ').slice(0,16)}</td>
+       <td>${b.status === 'Done' && b.version !== v.current ? `<button onclick="selectVersion('${b.version}')">run this</button>` : (b.version === v.current ? '<span class="pill-ok">running</span>' : '')}</td></tr>`).join('');
+  } catch (e) { $('builds').innerHTML = `<tr><td class="pill-bad">${esc(e.message)}</td></tr>`; }
+}
+async function selectVersion(v) { if (!confirm(`Switch code-2 to module ${v}? It reloads.`)) return;
+  try { toast(await api('/api/versions/select', {version: v})); setTimeout(loadVersions, 3000); } catch (e) { toast(e.message, true); } }
+async function deployNew() { const v = val('newversion'); if (!v || !confirm(`Upload this checkout as ${v} and start a cloud build?`)) return;
+  toast('Uploading…'); try { toast(await api('/api/deploy', {version: v})); setTimeout(loadVersions, 5000); } catch (e) { toast(e.message, true); } }
+async function loadLogs() {
+  try { const l = await api(`/api/logs?n=${val('logn')}&filter=${encodeURIComponent(val('logfilter'))}`);
+    $('logs').textContent = l.map(e => `${e.time} ${String(e.level).toUpperCase().padEnd(5)} ${e.logger}  ${e.message}`).join('\n') || 'No matching log lines.';
+  } catch (e) { $('logs').textContent = 'Error: ' + e.message; }
+}
+async function loadDescribe() {
+  try { const d = await api('/api/command', {action:'describe'});
+    $('place').innerHTML = d.place.goals.map(g => `<option value="${esc(g.name)}">${esc(g.name)}${g.color ? ' · ' + esc(g.color) : ''}</option>`).join('');
     $('place').value = d.default_goal;
-  } catch (e) { /* older module without describe */ }
+    $('pc-goal').innerHTML = d.place.goals.map(g => `<option>${esc(g.name)}</option>`).join('');
+  } catch (e) {}
 }
-let names = ['J1','J2','J3','J4','J5','J6'];
+// ---- live state
+function chip(id, text, cls) { $(id).textContent = text; $(id).className = 'chip ' + (cls || ''); }
 async function poll() {
   try {
-    const s = await api('/api/state');
-    const c = s.code2 || {};
-    $('state').textContent = c.error && !c.state ? 'code-2 unreachable' : (c.busy ? 'busy: ' : '') + (c.state || '?') + (s.moving ? ' · arm moving' : '');
-    $('state').className = 'pill ' + (c.busy ? 'busy' : (c.error ? 'err' : ''));
-    $('stage').textContent = 'stage ' + (c.stage || '—');
+    const s = await api('/api/state'), c = s.code2 || {}; lastStatus = c;
+    chip('c-state', c.state ? (c.busy ? 'busy · ' + (c.action || c.state) : c.state) + (s.moving ? ' · moving' : '') : 'code-2 unreachable',
+         c.busy ? 'busy' : (c.state === 'failed' || !c.state ? 'bad' : ''));
+    chip('c-stage', 'stage ' + (c.stage || '—'));
+    chip('c-impl', (c.implementation || '?').replace('pickplace-v1-open-loop-suction-press', 'pickplace v1'));
+    const clear = s.joints_deg.map((v, i) => Math.min(v - LIMITS[i][0], LIMITS[i][1] - v)), worst = Math.min(...clear);
+    chip('c-limit', 'min joint clearance ' + worst.toFixed(1) + '°', worst < 1 ? 'bad' : worst < 5 ? 'warn' : '');
     const t = $('joints');
-    if (t.rows.length === 1) names.forEach((n, i) => { const r = t.insertRow(); r.innerHTML =
-      `<td>${n}</td><td id="j${i}"></td><td><button onclick="jog(${i},-1)">−</button> <button onclick="jog(${i},1)">+</button></td>`; });
-    s.joints_deg.forEach((v, i) => $('j' + i).textContent = v.toFixed(2));
-    const p = s.tcp_world; $('tcp').textContent = `TCP x ${p.x.toFixed(1)} y ${p.y.toFixed(1)} z ${p.z.toFixed(1)} mm`;
-    show('status', c);
-  } catch (e) { $('state').textContent = 'offline: ' + e.message; $('state').className = 'pill err'; }
+    if (t.rows.length === 1) s.joints_deg.forEach((_, i) => { const r = t.insertRow(); r.innerHTML =
+      `<td>J${i+1}</td><td id="j${i}"></td><td><div class="bar"><i id="b${i}"></i></div></td><td><button onclick="jog(${i},-1)">−</button> <button onclick="jog(${i},1)">+</button></td>`; });
+    s.joints_deg.forEach((v, i) => { $('j' + i).textContent = v.toFixed(2); const span = (LIMITS[i][1] - LIMITS[i][0]) / 2;
+      const b = $('b' + i); b.style.width = Math.max(2, Math.min(100, 100 * clear[i] / span)) + '%'; b.className = clear[i] < 1 ? 'bad' : clear[i] < 5 ? 'warn' : ''; });
+    const p = s.tcp_world; $('tcp').textContent = `TCP  x ${p.x.toFixed(1)}  y ${p.y.toFixed(1)}  z ${p.z.toFixed(1)} mm`;
+    $('events').innerHTML = (c.events || []).slice().reverse().map(e => `<li>${esc((e.t || '').slice(11, 19))}  <b>${esc(e.stage)}</b> ${esc(Object.entries(e).filter(([k]) => !['t','stage'].includes(k)).map(([k, v]) => `${k}=${typeof v === 'object' ? JSON.stringify(v) : v}`).join(' '))}</li>`).join('') || '<li class="muted">no events yet</li>';
+    const o = c.last_result && c.last_result.outcome;
+    $('outcome').innerHTML = `<span>last request</span><span>${esc(c.last_request ? JSON.stringify(c.last_request) : '—')}</span><span>state</span><span>${esc(c.state || '—')}</span>` +
+      `<span>error</span><span class="${c.error ? 'pill-bad' : ''}">${esc(c.error || 'none')}</span>` +
+      (o ? `<span>vision check</span><span class="${o.cube_left_pick_spot ? 'pill-ok' : 'pill-warn'}">${esc(o.detail)}</span>` : '');
+    $('lastresult').textContent = pretty(c.last_result || {});
+    if (c.last_result && c.last_result.candidate) $('candidate').textContent = pretty(c.last_result.candidate);
+  } catch (e) { chip('c-state', 'offline: ' + e.message, 'bad'); }
 }
-setInterval(poll, 1500); setInterval(() => { if ($('live').checked) snap(); }, 1000);
-poll(); describe(); snap(); loadConfig();
+let saved = 'Run'; try { saved = localStorage.getItem('uv-tab') || 'Run'; } catch (e) {}
+show(TABS.includes(saved) ? saved : 'Run');
+setInterval(poll, 1500); setInterval(() => { if ($('live').checked && $('cam').offsetParent) snap(); }, 1000);
+poll(); loadDescribe();
 </script>
 </body>
 </html>
