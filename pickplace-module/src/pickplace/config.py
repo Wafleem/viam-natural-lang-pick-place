@@ -63,7 +63,8 @@ class Settings:
     # The builtin planner does not check a WorldState-attached cube against frame-system
     # geometry, so these are added to the plan request explicitly.
     workcell_obstacles: list = field(default_factory=lambda: [
-        {'frame': 'wall-front', 'dims_mm': [100.0, 3000.0, 1600.0]},
+        {'frame': 'wall-front', 'dims_mm': [100.0, 3000.0, 483.0]},
+        {'frame': 'wall-front-2', 'dims_mm': [100.0, 3000.0, 1277.0]},
         {'frame': 'ceiling', 'dims_mm': [3000.0, 3000.0, 100.0]}])
     carry_clearance_mm: float = 25.0  # swept-cube check margin against those obstacles
     box_entry_clearance_mm: float = 30.0

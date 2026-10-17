@@ -127,5 +127,31 @@
   },
   "pick_retries": 3,
   "sweep_speed_deg_s": 20,
-  "carry_clearance_mm": 25
+  "carry_clearance_mm": 25,
+  "workcell_obstacles": [
+    {
+      "frame": "wall-front",
+      "dims_mm": [
+        100,
+        3000,
+        483
+      ]
+    },
+    {
+      "frame": "wall-front-2",
+      "dims_mm": [
+        100,
+        3000,
+        1277
+      ]
+    },
+    {
+      "frame": "ceiling",
+      "dims_mm": [
+        3000,
+        3000,
+        100
+      ]
+    }
+  ]
 }
