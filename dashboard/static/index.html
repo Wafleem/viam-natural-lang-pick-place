@@ -76,6 +76,9 @@
   th { color:var(--muted); font-weight:500; font-size:12px; }
   .bar { height:6px; border-radius:3px; background:var(--line); overflow:hidden; min-width:70px; }
   .bar i { display:block; height:100%; background:var(--ok); } .bar i.warn { background:var(--warn); } .bar i.bad { background:var(--bad); }
+  .camwrap { position:relative; }
+  .fps { position:absolute; top:10px; right:10px; padding:3px 10px; border-radius:999px; background:rgba(0,0,0,.65); color:#fff;
+    font:600 13px ui-monospace,Menlo,monospace; } .fps:empty { display:none; }
   img.cam { display:block; width:100%; max-height:calc(100vh - 270px); object-fit:contain;  /* whole frame fits on screen */
     border-radius:10px; background:var(--code); min-height:160px; border:1px solid var(--line); }
   .kv { display:grid; grid-template-columns:auto minmax(0,1fr); gap:3px 12px; font-size:13px; }
@@ -181,9 +184,9 @@
     <h2>Wrist camera</h2>
     <div class="row"><button onclick="snap()">Snapshot</button>
       <label><input type="checkbox" id="overlay" checked> detection overlay</label>
-      <label><input type="checkbox" id="live"> live (1 fps)</label>
+      <label><input type="checkbox" id="live"> live</label>
       <span class="muted">The overlay shows 2D detections (cube corner marks, ring). Targets also need the calibrated overview pose.</span></div>
-    <img class="cam" id="cam" alt="wrist camera">
+    <div class="camwrap"><img class="cam" id="cam" alt="wrist camera"><span class="fps" id="fps"></span></div>
   </section>
   <section>
     <h2>Measure a new box</h2>
@@ -377,7 +380,15 @@ async function jog(joint, sign) { if (needClear()) return;
   try { await api('/api/arm/jog', {joint, delta_deg: sign * parseFloat(val('step')), speed_deg_s: parseFloat(val('speed')), workcell_ready:true}); }
   catch (e) { toast('Jog: ' + e.message, true); } }
 // ---- vision
-function snap() { $('cam').src = '/api/camera?overlay=' + ($('overlay').checked ? 1 : 0) + '&t=' + Date.now(); }
+function snap() { const c = $('cam'); c._asked = Date.now(); c.src = '/api/camera?overlay=' + ($('overlay').checked ? 1 : 0) + '&t=' + c._asked; }
+// Live view asks for the next frame as soon as the last one lands, so it runs as fast as the robot
+// link allows (about 4 fps) without piling up requests. The 1 s timer below only starts or unsticks it.
+const liveOn = () => $('live').checked && $('cam').offsetParent;
+$('cam').onload = () => { const c = $('cam'), now = Date.now();
+  if (c._last) { const r = 1000 / (now - c._last); c._fps = c._fps ? 0.7 * c._fps + 0.3 * r : r; }
+  c._last = now; c._asked = 0; $('fps').textContent = liveOn() && c._fps ? '● LIVE ' + c._fps.toFixed(1) + ' fps' : '';
+  if (liveOn()) snap(); };
+$('cam').onerror = () => { $('cam')._asked = 0; $('cam')._last = 0; };
 async function addCandidate(apply) {
   const cand = lastStatus.last_result && lastStatus.last_result.candidate;
   if (!cand) { toast('No candidate yet: run measure_box first.', true); return; }
@@ -536,7 +547,8 @@ async function poll() {
 }
 let saved = 'Run'; try { saved = localStorage.getItem('uv-tab') || 'Run'; } catch (e) {}
 show(TABS.includes(saved) ? saved : 'Run');
-setInterval(poll, 1500); setInterval(() => { if ($('live').checked && $('cam').offsetParent) snap(); }, 1000);
+setInterval(poll, 1500); setInterval(() => { const c = $('cam');
+  if (!liveOn()) { c._last = 0; $('fps').textContent = ''; } else if (!c._asked || Date.now() - c._asked > 15000) snap(); }, 1000);
 poll(); loadDescribe();
 </script>
 </body>
