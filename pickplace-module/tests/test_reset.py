@@ -78,9 +78,10 @@ def test_box_then_reset_cube_regrips_same_spot(settings, kin, urdf, tmp_path):
     assert ('vision-cube', 'goal-box-floor') in allows and ('vision-cube', 'vision-table') not in allows
     assert gripper.calls[-2:] == ['grab', 'open']
 
-    # The cube is on the table (the fake camera sees it): reset_cube looks, then does nothing.
+    # The (fake) camera sees the cube elsewhere on the table: reset_cube moves it onto the home spot.
     arm.moves.clear()
-    assert asyncio.run(cycle.reset_cube())['moved'] is False and arm.moves == []
+    again = asyncio.run(cycle.reset_cube())
+    assert again['cube_location']['place'] == 'home' and arm.moves and cycle.targets['source_place'] == 'table'
 
 
 def test_targets_are_deterministic(settings, observation, kin):
@@ -96,10 +97,17 @@ def test_memory_persists_and_unknown_blocks_reset(settings, kin, urdf, tmp_path)
     m.set('box', [1, 2, 3], 4.0, np.eye(4).tolist(), how='test')
     assert CubeMemory(tmp_path).location['place'] == 'box'
     assert CubeMemory(tmp_path).pickable_source()['top_world_mm'] == [1, 2, 3]
-    # Unknown memory: vision decides. The (fake) camera sees the cube on the table -> no motion.
+    # Unknown memory: vision decides. Nothing seen on the table and nothing remembered -> no motion.
+    from pickplace.cycle import CycleError
     cycle, arm, *_ = make_cycle(settings, kin, urdf, settings.overview_joints_deg)
     cycle.memory = CubeMemory(tmp_path/'other')
-    assert asyncio.run(cycle.reset_cube())['moved'] is False and arm.moves == []
+
+    async def nothing(goal, select='only', allow_sweep=True):
+        raise CycleError('Cube not found in the overview or the sweep views')
+    cycle.detect = nothing
+    with pytest.raises(CycleError, match='not found'):
+        asyncio.run(cycle.reset_cube())
+    assert [m for m in arm.moves if m[0] != 'stop'] == []  # only the precautionary stop
 
 
 def test_set_cube_location_for_a_box(settings, kin, urdf, tmp_path):
