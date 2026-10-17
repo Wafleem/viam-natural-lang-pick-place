@@ -145,8 +145,10 @@ def _parse(text, describe):
 def validate(command, describe=DESCRIBE):
     """Reject anything outside the advertised API before it reaches the robot."""
     action = command.get('action')
-    if action not in ('pick_place', 'dry_run', 'reset', 'reset_cube', 'status', 'stop', 'release', 'describe', 'self_test'):
+    if action not in ('pick_place', 'dry_run', 'reset', 'reset_cube', 'status', 'stop', 'release', 'describe', 'self_test', 'set_cube_location'):
         raise ValueError('Unsupported action '+str(action))
+    if action == 'set_cube_location' and command.get('place') != 'home':
+        raise ValueError('By voice the cube can only be marked as home')
     if action in ('pick_place', 'dry_run'):
         select = command['pick']['select']
         if not (isinstance(select, dict) and isinstance(select.get('index'), int)) and select not in describe['pick']['select']:
