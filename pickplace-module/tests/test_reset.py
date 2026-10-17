@@ -80,8 +80,8 @@ def test_targets_are_deterministic(settings, observation, kin):
     a = compute_targets(settings, observation, 'box', kin, settings.overview_joints_deg)
     b = compute_targets(settings, observation, 'box', kin, settings.overview_joints_deg)
     assert json.dumps(a, sort_keys=True, default=float) == json.dumps(b, sort_keys=True, default=float)
-    # grip spot: 15 mm from the top-face centre, toward the edge facing image-top, every time
-    assert a['grasp']['offset_in_cube_mm'][:2] == pytest.approx([0, -15], abs=1e-6)
+    # grip spot: grasp_toward_image_top_mm from the top-face centre, toward image-top, every time
+    assert a['grasp']['offset_in_cube_mm'][:2] == pytest.approx([0, -settings.grasp_toward_image_top_mm], abs=1e-6)
 
 
 def test_memory_persists_and_unknown_blocks_reset(settings, kin, urdf, tmp_path):
@@ -148,3 +148,34 @@ def test_fixed_ring_spot_needs_no_vision(attrs, observation, kin):
     from pickplace.planning import scene_world
     labels = {g.label for g in scene_world(s, obs, t, 'placed', 'ring').obstacles[0].geometries}
     assert {'vision-ring', 'vision-ring-45', 'vision-ring-90', 'vision-ring-135'} <= labels
+
+
+def test_missed_seal_or_drop_retries_then_gives_up(settings, kin, urdf, tmp_path):
+    cycle, arm, gripper, *_ = make_cycle(settings, kin, urdf, settings.overview_joints_deg)
+    cycle.memory = CubeMemory(tmp_path)
+    dropped = []
+
+    def first_lift_drops(on):  # seals every time; the first check after a lift shows it gone
+        if on and cycle.events[-1]['stage'] == 'lift' and not dropped:
+            dropped.append(True)
+            return False
+        return on
+    gripper.script = first_lift_drops
+
+    async def seen_ok(goal, remembered=None):
+        return {'cube_left_pick_spot': True, 'detail': 'simulated'}
+    cycle.verify_outcome = seen_ok
+    asyncio.run(cycle.run('box'))
+    names = [e['stage'] for e in cycle.events]
+    assert names.count('press') == 2 and 'retrying_pick' in names and names[-1] == 'complete'
+    assert [e['held'] for e in cycle.events if e['stage'] == 'hold_check'] == [False, True]
+
+    # Never seals: no lift at all, pick_retries+1 presses, then a clear error.
+    cycle2, arm2, gripper2, *_ = make_cycle(settings, kin, urdf, settings.overview_joints_deg)
+    cycle2.memory = CubeMemory(tmp_path/'b')
+    gripper2.script = lambda on: False
+    from pickplace.cycle import CycleError
+    with pytest.raises(CycleError, match='No grip'):
+        asyncio.run(cycle2.run('box'))
+    names = [e['stage'] for e in cycle2.events]
+    assert names.count('press') == settings.pick_retries+1 and 'lift' not in names

@@ -4,9 +4,10 @@ Order: release suction -> return to the calibrated overview -> 5-frame RGB-D det
 -> plan every stage -> approach, descend, SUCTION ON, press press_depth_mm into the cube,
 dwell, lift, transfer, place, SUCTION OFF, dwell, retract, return.
 
-Suction is OPEN LOOP: the vacuum gripper's IsHoldingSomething feedback is not read
-anywhere (its driver reports inconsistently). Alignment comes from vision; collision
-avoidance and centring come from the motion planner.
+Suction is CLOSED LOOP since the driver update: the press waits for IsHoldingSomething to
+report a seal, the lift is checked with it, and a missed seal or a drop triggers a re-pick
+(pick_retries). Alignment comes from vision; collision avoidance and centring come from
+the motion planner.
 """
 import asyncio
 import copy
@@ -132,8 +133,11 @@ class PickPlaceCycle:
     # ---- suction (open loop) ---------------------------------------------
     async def suction_on(self):
         self.event('suction_on')
-        if await self.gripper.grab(timeout=5) is False:
-            raise CycleError('Vacuum gripper rejected the Grab command')
+        # Open loop: Grab's bool mirrors the unreliable holding sensor (false in the air), so it
+        # never gates the press. Only an exception means the command itself failed.
+        reply = await self.gripper.grab(timeout=5)
+        if reply is False:
+            self.event('grab_reported_not_holding', note='ignored: open-loop suction')
 
     async def suction_off(self, dwell=True):
         self.event('suction_off')
@@ -452,6 +456,28 @@ class PickPlaceCycle:
         obs.pop('cube', None)
         return obs
 
+    async def holding(self, reads=3):
+        """Closed loop: the vacuum gripper's holding sensor (reliable since the driver update).
+        True only if every one of `reads` quick reads agrees, so one glitch can't fake a grip."""
+        for _ in range(reads):
+            status = await self.read(lambda: self.gripper.is_holding_something(timeout=3))
+            if not status.is_holding_something:
+                return False
+            await asyncio.sleep(.1)
+        return True
+
+    async def wait_for_seal(self):
+        """At the bottom of the press: wait (up to suction_dwell_s) until the sensor reports a seal,
+        then hold seal_settle_s more so it firms up. Returns the seconds it took, or None."""
+        start = time.monotonic()
+        while time.monotonic()-start < self.s.suction_dwell_s:
+            if await self.holding(reads=1):
+                took = time.monotonic()-start
+                await asyncio.sleep(self.s.seal_settle_s)
+                return round(took, 2) if await self.holding() else None
+            await asyncio.sleep(.1)
+        return None
+
     async def run(self, goal, select='only', source='auto'):
         """One full cycle to `goal`. The cube comes from vision when it is on the table, or from
         the remembered placement when it sits in a box or on the ring (source='auto').
@@ -472,15 +498,31 @@ class PickPlaceCycle:
                     raise CycleError('Ring goal needs the ring in view from the overview')
             if remembered is not None and remembered['place'] == goal:
                 raise CycleError(f'The cube is already at {goal}')
-            plans = dict((name, (path, speed)) for name, path, speed in await self.plan(goal, source=remembered))
-            for name in ('approach', 'descend'):
-                await self.execute(name, *plans[name])
-            touched = True  # from here on a failure may leave the cube anywhere along the path
-            await self.suction_on()
-            await self.execute('press', *plans['press'])
-            self.event('suction_dwell', seconds=self.s.suction_dwell_s)
-            await asyncio.sleep(self.s.suction_dwell_s)
-            for name in ('lift', 'transfer', 'place'):
+            for attempt in range(1, self.s.pick_retries+2):
+                plans = dict((name, (path, speed)) for name, path, speed in await self.plan(goal, source=remembered))
+                for name in ('approach', 'descend'):
+                    await self.execute(name, *plans[name])
+                touched = True  # from here on a failure may leave the cube anywhere along the path
+                await self.suction_on()
+                await self.execute('press', *plans['press'])
+                sealed = await self.wait_for_seal()
+                self.event('seal', attempt=attempt, sealed=sealed is not None, seconds=sealed)
+                held = False
+                if sealed is not None:
+                    await self.execute('lift', *plans['lift'])
+                    held = await self.holding()
+                    self.event('hold_check', attempt=attempt, held=held)
+                if held:
+                    break
+                if attempt > self.s.pick_retries:
+                    raise CycleError(f'No grip (seal or lift) on all {attempt} attempts')
+                self.event('retrying_pick', attempt=attempt+1)
+                await self.go_to_overview(Planner(self.motion, self.s, self.kin))  # suction off first
+                if remembered is None or remembered['place'] in ('table', 'home'):
+                    remembered = None
+                    await self.detect(goal, select)  # find it again (it may have fallen; sweeps if needed)
+                # from a box/ring it fell back into the same place: re-pick from memory
+            for name in ('transfer', 'place'):
                 await self.execute(name, *plans[name])
             await self.suction_off()
             for name in ('retract', 'return'):

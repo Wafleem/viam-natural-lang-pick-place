@@ -92,8 +92,9 @@ class PickPlaceService(Generic, EasyResource):
             'available_goals': s.goals, 'calibrated': bool(s.calibration),
             'goal_details': ([{'name': 'home', 'type': 'table'}] if s.home else [])+[{'name': 'ring', 'type': 'ring'}]+[
                 {'name': n, 'type': 'box', 'color': b.get('color')} for n, b in s.boxes.items()],
-            'suction': {'mode': 'open_loop', 'holding_feedback_used': False, 'press_depth_mm': s.press_depth_mm,
-                        'suction_dwell_s': s.suction_dwell_s, 'release_dwell_s': s.release_dwell_s},
+            'suction': {'mode': 'closed_loop', 'holding_feedback_used': True, 'press_depth_mm': s.press_depth_mm,
+                        'suction_dwell_s': s.suction_dwell_s, 'seal_settle_s': s.seal_settle_s,
+                        'pick_retries': s.pick_retries, 'release_dwell_s': s.release_dwell_s},
             'speeds_deg_s': {'travel': s.travel_speed_deg_s, 'approach': s.approach_speed_deg_s, 'press': s.press_speed_deg_s},
             'joint_limit_margin_deg': s.joint_limit_margin_deg,
             'last_request': copy.deepcopy(getattr(self, 'last_request', {})),
