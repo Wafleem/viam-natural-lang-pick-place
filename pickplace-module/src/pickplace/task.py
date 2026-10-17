@@ -165,6 +165,8 @@ def compute_targets(settings, observation, goal, kinematics, start_joints_deg, s
                 continue
             # From memory, prefer the exact remembered grip (first candidate): same cup spot every time.
             picks.append((_travel(q, start_joints_deg)+(0 if source is None or not i else 1e6), yaw, contact, above, q, grasp))
+        if source is not None and picks:
+            break  # the remembered grip is reachable: the other turns would never be chosen, skip their IK
     if not picks:
         raise ValueError('No pickup orientation is reachable with the joint-limit margin')
     best = None
