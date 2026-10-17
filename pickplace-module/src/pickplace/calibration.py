@@ -35,14 +35,16 @@ def calibrated_xy(calibration, xy):
     return _rotation(calibration['yaw_correction_deg']) @ np.asarray(xy[:2], float)+np.asarray(calibration['xy_offset_mm'], float)
 
 
-def cube_target(observation, calibration):
-    """(cube top center at taught contact height, world edge yaw in [-45, 45))."""
+def cube_target(observation, calibration, yaw_step=90.0):
+    """(object top center at taught contact height, world yaw in [-step/2, step/2)).
+
+    yaw_step is the object's symmetry: 90 for the square cube, 180 for a phone (long axis)."""
     check_view(observation, calibration)
     cube = observation['cube']
     if abs(cube['top_center_world_mm'][2]-calibration['observed_cube_z_mm']) > 12:
         raise ValueError('Cube height changed; it must rest on the calibrated tabletop')
     xy = calibrated_xy(calibration, cube['top_center_world_mm'])
-    yaw = (cube['world_yaw_deg']+calibration['yaw_correction_deg']+45) % 90-45
+    yaw = (cube['world_yaw_deg']+calibration['yaw_correction_deg']+yaw_step/2) % yaw_step-yaw_step/2
     return np.array([*xy, calibration['pickup_tcp_z_mm']]), float(yaw)
 
 
@@ -56,3 +58,8 @@ def ring_target(observation, calibration):
         raise ValueError('Ring height changed; it must rest on the calibrated tabletop')
     xy = calibrated_xy(calibration, ring['top_center_world_mm'])
     return np.array([*xy, calibration['place_tcp_z_mm']])
+
+
+def calibrated_direction(calibration, xy):
+    """A camera-world direction (unit xy) in tool coordinates: rotation only, no offset."""
+    return _rotation(calibration['yaw_correction_deg']) @ np.asarray(xy[:2], float)

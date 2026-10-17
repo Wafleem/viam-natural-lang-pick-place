@@ -196,6 +196,146 @@ def _measure_cube(cube,bgr,valid,cloud,hsv,table_z,intr,camera_pose,nominal):
     return {'top_center_world_mm':center,'world_yaw_deg':yaw,'top_dimensions_mm':dims,'observed_height_mm':observed_height,'top_normal_world':cn,'pixel_hint':cube['center']}
 
 
+
+PHONE_DARK_V = 85  # black phone case: HSV value at most this
+
+
+def find_phones(bgr, rings=()):
+    """Dark, filled, phone-shaped rectangles (pixel space). The ring has a hole; tape marks and
+    cables are too small or too thin. Returns [{'rect', 'bbox', 'mask', 'center'}]."""
+    hsv = cv2.cvtColor(cv2.GaussianBlur(bgr, (5, 5), 0), cv2.COLOR_BGR2HSV)
+    dark = cv2.inRange(hsv, (0, 0, 0), (179, 255, PHONE_DARK_V))
+    dark = cv2.morphologyEx(dark, cv2.MORPH_CLOSE, np.ones((9, 9), np.uint8))  # lenses / glare inside the case
+    dark = cv2.morphologyEx(dark, cv2.MORPH_OPEN, np.ones((7, 7), np.uint8))
+    contours, hierarchy = cv2.findContours(dark, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
+    found = []
+    for i, c in enumerate(contours if hierarchy is not None else []):
+        if hierarchy[0][i][3] != -1:
+            continue
+        area = cv2.contourArea(c)
+        if area < 4000:
+            continue
+        rect = cv2.minAreaRect(c)
+        (cx, cy), (rw, rh), _ = rect
+        if min(rw, rh) < 20 or not 1.4 < max(rw, rh)/min(rw, rh) < 3.0 or area/(rw*rh) < .8:
+            continue
+        x, y, w, h = cv2.boundingRect(c)
+        if any(_overlap((x, y, w, h), r['bbox']) for r in rings):
+            continue
+        mask = np.zeros(dark.shape, np.uint8)
+        cv2.drawContours(mask, [c], -1, 1, -1)
+        found.append({'rect': rect, 'bbox': (x, y, w, h), 'mask': mask, 'center': (cx, cy)})
+    return found
+
+
+def _overlap(a, b):
+    return a[0] < b[0]+b[2] and b[0] < a[0]+a[2] and a[1] < b[1]+b[3] and b[1] < a[1]+a[3]
+
+
+def _measure_phone(phone, bgr, valid, cloud, hsv, tn, td, table_z, intr, camera_pose, footprint, height):
+    """Top-face centre, long-axis yaw, size, height and camera-bump direction of one phone."""
+    top_d = td+height*tn[2]  # plane of the case back
+    corners = np.array([ray_plane(p, intr, camera_pose, tn, top_d) for p in cv2.boxPoints(phone['rect'])])
+    edges = [corners[(i+1) % 4]-corners[i] for i in range(4)]
+    lengths = [float(np.linalg.norm(e[:2])) for e in edges]
+    k = int(np.argmax(lengths[:2]))
+    long_axis = edges[k][:2]/lengths[k]
+    dims = [max(lengths[0], lengths[1]), min(lengths[0], lengths[1])]
+    length, width = footprint
+    if not (.8*length < dims[0] < 1.2*length and .8*width < dims[1] < 1.25*width):
+        raise ValueError(f'Detected phone {dims[0]:.0f} x {dims[1]:.0f} mm does not match the configured {length:.0f} x {width:.0f} mm')
+    center = corners.mean(axis=0)
+    yaw = math.degrees(math.atan2(long_axis[1], long_axis[0]))
+    yaw = (yaw+90) % 180-90
+    long_axis = np.array([math.cos(math.radians(yaw)), math.sin(math.radians(yaw))])
+    inside = cv2.erode(phone['mask'], np.ones((15, 15), np.uint8)) > 0
+    pts = cloud[inside & valid]
+    observed_height = None
+    if len(pts) >= 200:
+        heights = pts@tn-td
+        observed_height = float(np.median(heights))
+        if not 2 < observed_height < height+12:
+            raise ValueError(f'Phone height {observed_height:.0f} mm above the table does not match {height:.0f} mm')
+    # Camera bump: the end with the glossy lenses (bright pixels) and the raised island (depth).
+    along = None
+    score = []
+    for sign in (1, -1):
+        half = np.zeros(inside.shape, bool)
+        world = cloud[..., :2]-center[:2]
+        half = inside & ((world@long_axis)*sign > dims[0]*.15)
+        bright = int(np.sum(half & (hsv[:, :, 2] > 170)))
+        raised = 0.0
+        hp = cloud[half & valid]
+        if len(hp) >= 100:
+            raised = float(np.percentile(hp@tn-td, 95))
+        score.append((bright, raised))
+    (b1, r1), (b2, r2) = score
+    if max(b1, b2) >= 30 and max(b1, b2) > 3*max(1, min(b1, b2)):
+        along = 1 if b1 > b2 else -1
+    elif abs(r1-r2) >= 2.0:
+        along = 1 if r1 > r2 else -1
+    bump = None if along is None else (long_axis*along).tolist()
+    return {'kind': 'phone', 'top_center_world_mm': center, 'world_yaw_deg': yaw, 'top_dimensions_mm': dims,
+            'observed_height_mm': observed_height if observed_height is not None else height, 'depth_height_checked': observed_height is not None,
+            'top_normal_world': tn, 'pixel_hint': phone['center'], 'bump_world_xy': bump,
+            'bump_evidence': {'bright_px': [b1, b2], 'raised_mm': [round(r1, 1), round(r2, 1)]}}
+
+
+def analyze_phone(bgr, depth, props, camera_pose, attrs, require_ring, select, require_cube):
+    """Phone variant of analyze(): same output keys ('cubes'/'cube' hold the phone)."""
+    obj = attrs['object']
+    intr = intrinsics(props, depth.shape)
+    cloud = world_cloud(depth, intr, camera_pose)
+    valid = (depth > 150) & (depth < 1800) & np.isfinite(depth)
+    _, rings = find_objects(bgr)
+    phones = find_phones(bgr, rings)
+    result = {'cube_count': len(phones), 'ring_count': len(rings), 'issues': [], 'object': 'phone',
+              'camera_pose_world': camera_pose, 'camera_intrinsics': intr, 'nominal_cube_size_mm': obj['height_mm']}
+    if not phones and require_cube:
+        result['issues'].append('No phone in view')
+    if len(rings) > 1 or (require_ring and len(rings) != 1):
+        result['issues'].append('Need exactly one full ring in view')
+    if result['issues']:
+        return native(result)
+    h, w = depth.shape
+    for p in phones:
+        x, y, bw, bh = p['bbox']
+        if min(x, y) < 8 or x+bw > w-8 or y+bh > h-8:
+            result['issues'].append('phone is clipped by image edge')
+            return native(result)
+    hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
+    objects = np.zeros(depth.shape, np.uint8)
+    for p in phones:
+        objects |= p['mask']
+    if rings:
+        cv2.ellipse(objects, rings[0]['ellipse'], 1, -1)
+    excluded = cv2.dilate(objects, np.ones((35, 35), np.uint8))
+    table_mask = valid & (excluded == 0) & (hsv[:, :, 1] < 55) & (hsv[:, :, 2] > 100)
+    tn, td, table_points = fit_horizontal_plane(cloud[table_mask])
+    table_z = float(np.median(table_points[:, 2]))
+    result['observed_table_z_mm'] = table_z
+    result['table_reference_error_mm'] = table_z-attrs.get('table_z_mm', -23)
+    if abs(result['table_reference_error_mm']) > 15:
+        result['issues'].append('Depth/world tabletop differs from configured table by more than 15 mm; camera calibration needs verification')
+    measured = []
+    for p in phones:
+        try:
+            measured.append(_measure_phone(p, bgr, valid, cloud, hsv, tn, td, table_z, intr, camera_pose, obj['footprint_mm'], obj['height_mm']))
+        except ValueError as e:
+            result['issues'].append(str(e))
+            return native(result)
+    result['cubes'] = measured
+    if measured or require_cube:
+        try:
+            result['cube'] = select_cube(measured, select)
+        except ValueError as e:
+            result['issues'].append(str(e).replace('cube', 'phone'))
+            return native(result)
+    if rings:
+        result['ring_seen'] = True
+    return native(result)
+
+
 def analyze(bgr,depth,props,camera_pose,attrs,require_ring=True,select='only',require_cube=True):
     """Locate every white cube (top face) and, when visible, the black ring.
 
@@ -205,6 +345,8 @@ def analyze(bgr,depth,props,camera_pose,attrs,require_ring=True,select='only',re
     optional obstacle otherwise.
     """
     if bgr.shape[:2]!=depth.shape:raise ValueError('Color/depth sizes differ')
+    if (attrs.get('object') or {}).get('kind')=='phone':
+        return analyze_phone(bgr,depth,props,camera_pose,attrs,require_ring,select,require_cube)
     intr=intrinsics(props,depth.shape)
     cloud=world_cloud(depth,intr,camera_pose)
     valid=(depth>150)&(depth<1800)&np.isfinite(depth)

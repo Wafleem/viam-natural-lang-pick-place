@@ -148,3 +148,31 @@ def test_fixed_ring_spot_needs_no_vision(attrs, observation, kin):
     from pickplace.planning import scene_world
     labels = {g.label for g in scene_world(s, obs, t, 'placed', 'ring').obstacles[0].geometries}
     assert {'vision-ring', 'vision-ring-45', 'vision-ring-90', 'vision-ring-135'} <= labels
+
+
+def test_dropped_at_lift_retries_then_gives_up(settings, kin, urdf, tmp_path):
+    cycle, arm, *_ = make_cycle(settings, kin, urdf, settings.overview_joints_deg)
+    cycle.memory = CubeMemory(tmp_path)
+    checks = iter([{'held': False}, {'held': True}])
+
+    async def hold(z):
+        return next(checks)
+    cycle.cube_held_after_lift = hold
+
+    async def seen_ok(goal, remembered=None):
+        return {'cube_left_pick_spot': True, 'detail': 'simulated'}
+    cycle.verify_outcome = seen_ok
+    asyncio.run(cycle.run('box'))
+    names = [e['stage'] for e in cycle.events]
+    assert names.count('press') == 2 and 'retrying_pick' in names and names[-1] == 'complete'
+
+    cycle2, *_ = make_cycle(settings, kin, urdf, settings.overview_joints_deg)
+    cycle2.memory = CubeMemory(tmp_path/'b')
+
+    async def never(z):
+        return {'held': False}
+    cycle2.cube_held_after_lift = never
+    from pickplace.cycle import CycleError
+    with pytest.raises(CycleError, match='all 4 attempts'):
+        asyncio.run(cycle2.run('box'))
+    assert [e['stage'] for e in cycle2.events].count('press') == settings.pick_retries+1

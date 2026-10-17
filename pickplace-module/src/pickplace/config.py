@@ -38,7 +38,14 @@ class Settings:
     home: dict | None = None  # {"xy_mm": [x, y], "yaw_deg": a}: the cube's table spot, goal "home"
     ring_spot: dict | None = None  # {"xy_mm", "diameter_mm", "height_mm"}: fixed ring; else vision finds it
     default_goal: str = 'ring'
-    cube_size_mm: float = 200.0
+    cube_size_mm: float = 200.0  # object HEIGHT (the cube's edge; the phone's thickness)
+    # Gripped object. "cube": the 200 mm white cube (square, 90 deg symmetric).
+    # "phone": a flat dark-cased phone, case up; 180 deg symmetric, gripped off-centre away
+    # from its camera bump with the cup pair along its length.
+    object_kind: str = 'cube'
+    object_footprint_mm: list = field(default_factory=lambda: [200.0, 200.0])  # [length, width]
+    grip_away_from_bump_mm: float = 0.0
+    cup_axis_tool_deg: float = 90.0  # the two visible cups lie along tool +/-y (measured)
     table_z_mm: float = -23.0
     # Pickup: approach above the cube, descend to pre-contact, switch suction on,
     # then press press_depth_mm below the taught contact height. Suction is open loop.
@@ -46,6 +53,7 @@ class Settings:
     pre_contact_mm: float = 20.0
     suction_dwell_s: float = 1.0
     release_dwell_s: float = 1.0
+    pick_retries: int = 3  # re-picks after the camera sees the cube dropped at the lift
     clearance_mm: float = 100.0
     box_entry_clearance_mm: float = 30.0
     # Camera sweep when the cube is not fully seen from the overview: sideways shifts (dx, dy mm)
@@ -89,14 +97,31 @@ class Settings:
         if not isinstance(correction, list) or len(correction) != 2 or math.hypot(*correction) > 25:
             raise ValueError('placement_correction_world_xy_mm needs two values with magnitude <= 25 mm')
         mount = attrs.get('camera_mount_reference')
+        size = _number(attrs, 'cube_size_mm', 200, 20, 400)
+        kind, footprint, grip_away, obj = 'cube', [size, size], 0.0, attrs.get('object')
+        if obj is not None:
+            if not isinstance(obj, dict) or obj.get('kind') not in ('cube', 'phone'):
+                raise ValueError('object must be {"kind": "cube"} or {"kind": "phone", "length_mm", "width_mm", "thickness_mm"}')
+            kind = obj['kind']
+        if kind == 'phone':
+            length = _number(obj, 'length_mm', 150, 80, 250)
+            width = _number(obj, 'width_mm', 73, 40, 150)
+            thick = _number(obj, 'thickness_mm', 9.5, 4, 30)
+            grip_away = _number(obj, 'grip_away_from_bump_mm', 20, 0, length/2-40)
+            # The calibration's taught heights are for the reference cube top. Every table
+            # height shifts by (phone thickness - cube height); xy calibration is unchanged.
+            delta = thick-_number(attrs, 'calibration_object_height_mm', 200, 20, 400)
+            cal = {**cal, **{k: cal[k]+delta for k in ('pickup_tcp_z_mm', 'place_tcp_z_mm', 'observed_cube_z_mm')}}
+            size, footprint = thick, [length, width]
         s = cls(
             calibration=cal, overview_joints_deg=overview, boxes=boxes, home=home, ring_spot=ring_spot, default_goal=goal,
-            cube_size_mm=_number(attrs, 'cube_size_mm', 200, 20, 400),
+            cube_size_mm=size, object_kind=kind, object_footprint_mm=footprint, grip_away_from_bump_mm=grip_away,
             table_z_mm=_number(attrs, 'table_z_mm', -23, -500, 500),
             press_depth_mm=_number(attrs, 'press_depth_mm', 10, 0, 20),
             pre_contact_mm=_number(attrs, 'pre_contact_mm', 20, 5, 100),
             suction_dwell_s=_number(attrs, 'suction_dwell_s', 1.0, 0, 10),
             release_dwell_s=_number(attrs, 'release_dwell_s', 1.0, 0, 10),
+            pick_retries=int(_number(attrs, 'pick_retries', 3, 0, 5)),
             clearance_mm=_number(attrs, 'clearance_mm', 100, 30, 300),
             box_entry_clearance_mm=_number(attrs, 'box_entry_clearance_mm', 30, 10, 200),
             release_above_goal_mm=_number(attrs, 'release_above_goal_mm', 0, 0, 50),
@@ -117,7 +142,19 @@ class Settings:
         )
         if s.press_depth_mm >= s.pre_contact_mm+s.cube_size_mm/2:
             raise ValueError('press_depth_mm is unreasonably deep for this cube')
+        if kind == 'phone' and s.press_depth_mm > 8:
+            raise ValueError('press_depth_mm above 8 mm would crush a phone into the table')
         return s
+
+    @property
+    def yaw_step_deg(self):
+        """Pickup symmetry: a square cube repeats every 90 deg, a phone every 180 deg."""
+        return 180.0 if self.object_kind == 'phone' else 90.0
+
+    @property
+    def vision_object(self):
+        """What analyze() looks for."""
+        return {'kind': self.object_kind, 'footprint_mm': list(self.object_footprint_mm), 'height_mm': self.cube_size_mm}
 
     @property
     def goals(self):
