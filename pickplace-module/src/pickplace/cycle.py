@@ -188,7 +188,7 @@ class PickPlaceCycle:
         return {'candidate': candidate, 'frames': found,
                 'next_step': 'Check the opening with a tape measure, then add the candidate to the "boxes" attribute'}
 
-    async def detect(self, goal, select='only'):
+    async def detect(self, goal, select='only', allow_sweep=True):
         """Find the cube: the overview first, then a camera sweep if it is not fully in view."""
         try:
             return await self.detect_at_overview(goal, select)
@@ -197,6 +197,8 @@ class PickPlaceCycle:
             if not any(k in text for k in ('No cube in view', 'clipped', 'Cube top surface', 'Need exactly one full cube')):
                 raise
             self.event('cube_not_in_overview', reason=text[:120])
+            if not allow_sweep:
+                raise CycleError(text+' -- a camera sweep would move the arm: send dry_run with "workcell_ready": true')
         return await self.sweep_for_cube(goal, select)
 
     def overview_visible(self, xy, z=None, margin=25):
@@ -240,11 +242,18 @@ class PickPlaceCycle:
         to_raw = np.array([[np.cos(a), np.sin(a)], [-np.sin(a), np.cos(a)]])
         found, tried = None, []
         try:
-            for off in s.sweep_j1_offsets_deg:
-                q = list(s.overview_joints_deg)
-                q[0] += off
+            T0 = self.kin.fk(s.overview_joints_deg)
+            for off in s.sweep_offsets_mm:
+                T = T0.copy()
+                T[0, 3] += off[0]
+                T[1, 3] += off[1]
+                try:  # same camera orientation and height, shifted sideways
+                    q = self.kin.ik(T, s.overview_joints_deg, 3.0)
+                except ValueError:
+                    tried.append({'shift_mm': off, 'skipped': 'unreachable'})
+                    continue
                 path = await planner.segment(await self.joints(), world, goal_deg=q, margin=1.0)
-                await self.execute(f'sweep_{off:+g}', path, s.sweep_speed_deg_s)
+                await self.execute(f'sweep_{off[0]:+g}_{off[1]:+g}', path, s.sweep_speed_deg_s)
                 await asyncio.sleep(.6)
                 hits = []
                 for _ in range(4):
@@ -255,7 +264,7 @@ class PickPlaceCycle:
                     corr = ring_ref-calibrated_xy(cal, obs['ring']['top_center_world_mm'])
                     hits.append((calibrated_xy(cal, obs['cube']['top_center_world_mm'])+corr, obs['cube']['world_yaw_deg']+g, obs['cube'], corr))
                     await asyncio.sleep(.1)
-                tried.append({'pan_deg': off, 'frames_with_cube_and_ring': len(hits)})
+                tried.append({'shift_mm': off, 'frames_with_cube_and_ring': len(hits)})
                 if len(hits) >= 3:
                     xy = np.median([h[0] for h in hits], axis=0)
                     yaws = np.array([h[1] for h in hits])
@@ -279,9 +288,9 @@ class PickPlaceCycle:
         cube = {**cube, 'top_center_world_mm': [float(raw[0]), float(raw[1]), float(cal['observed_cube_z_mm'])],
                 'world_yaw_deg': float((yaw-g+45) % 90-45)}
         obs['cube'], obs['cubes'] = cube, [cube]
-        obs['sweep'] = {'pan_deg': off, 'ring_anchor_correction_mm': [float(c) for c in corr], 'cube_tool_xy_mm': [float(v) for v in xy]}
+        obs['sweep'] = {'shift_mm': off, 'ring_anchor_correction_mm': [float(c) for c in corr], 'cube_tool_xy_mm': [float(v) for v in xy]}
         self.observation = native(obs)
-        self.event('cube_found_by_sweep', pan_deg=off, xy=[round(float(v), 1) for v in xy])
+        self.event('cube_found_by_sweep', shift_mm=off, xy=[round(float(v), 1) for v in xy])
         return self.observation
 
     async def detect_at_overview(self, goal, select='only'):
@@ -586,7 +595,7 @@ class PickPlaceCycle:
         self.event('self_test_done', ok=report['ok'])
         return report
 
-    async def dry_run(self, goal, select='only'):
+    async def dry_run(self, goal, select='only', allow_sweep=False):
         """Detect and plan at the overview without moving anything."""
         await self.preflight()
         q = await self.joints()
@@ -594,7 +603,12 @@ class PickPlaceCycle:
             raise CycleError('Dry run detects from the calibrated overview; run {"action":"reset"} first')
         remembered = self.memory.pickable_source()
         if remembered is None:
-            await self.detect(goal, select)
+            if allow_sweep:
+                await self.acquire_lease()
+            try:
+                await self.detect(goal, select, allow_sweep)
+            finally:
+                await self.release_lease()
         else:
             self.event('using_remembered_cube', place=remembered['place'])
             self.observation = await self.look_for_obstacles()

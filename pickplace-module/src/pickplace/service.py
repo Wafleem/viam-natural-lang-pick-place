@@ -117,7 +117,7 @@ class PickPlaceService(Generic, EasyResource):
             elif action == 'reset_cube':
                 self.last_result = await self.cycle.reset_cube()
             elif action == 'dry_run':
-                self.last_result = await self.cycle.dry_run(goal, select)
+                self.last_result = await self.cycle.dry_run(goal, select, args.get('allow_sweep', False))
             elif action == 'measure_box':
                 self.last_result = await self.cycle.survey_box(args['name'])
             elif action == 'self_test':
@@ -189,6 +189,8 @@ class PickPlaceService(Generic, EasyResource):
             args['goal'] = command.get('goal', s.default_goal)
         if args['goal'] not in s.goals:
             raise ValueError('goal must be one of: '+', '.join(s.goals))
+        if action == 'dry_run':
+            args['allow_sweep'] = command.get('workcell_ready') is True  # a sweep moves the camera
         return args
 
     async def do_command(self, command: Mapping[str, ValueTypes], *, timeout: Optional[float] = None, **kwargs) -> Mapping[str, ValueTypes]:
