@@ -179,3 +179,18 @@ def test_missed_seal_or_drop_retries_then_gives_up(settings, kin, urdf, tmp_path
         asyncio.run(cycle2.run('box'))
     names = [e['stage'] for e in cycle2.events]
     assert names.count('press') == settings.pick_retries+1 and 'lift' not in names
+
+
+def test_carried_cube_sweep_catches_the_wall(settings, kin):
+    """The cube hangs 200 mm under the cups: a wrist tilt swings it far past the TCP."""
+    from pickplace.planning import carried_cube_violations
+    G = [[-1, 0, 0, 0], [0, 1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]]
+    from pickplace.vision_geometry import downward_pose
+    q = kin.ik(downward_pose(np.array([350.0, 0.0, 350.0]), 0.0), settings.overview_joints_deg, 5)
+    tcp_x = kin.fk(q)[0, 3]
+    wall = [('wall-front', [tcp_x+160, 0, 454], [100, 3000, 1600], 0.0)]  # face 110 mm past the TCP
+    assert carried_cube_violations(kin, [q, q], G, 200, wall, 0) == []  # hanging straight down: clear
+    tilted = list(q)
+    tilted[4] += 40  # wrist pitch swings the cube outward
+    bad = carried_cube_violations(kin, [q, tilted], G, 200, wall, 25)
+    assert bad and bad[0][0] == 'wall-front'

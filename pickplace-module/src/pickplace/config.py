@@ -24,6 +24,15 @@ def _name(attrs, key, default):
     return value
 
 
+def _obstacles(value):
+    if value is None:
+        return Settings.__dataclass_fields__['workcell_obstacles'].default_factory()
+    if not isinstance(value, list) or not all(isinstance(o, dict) and isinstance(o.get('frame'), str) and isinstance(o.get('dims_mm'), list)
+                                              and len(o['dims_mm']) == 3 and all(isinstance(v, (int, float)) and v > 0 for v in o['dims_mm']) for o in value):
+        raise ValueError('workcell_obstacles must be [{"frame": name, "dims_mm": [x, y, z]}, ...]')
+    return [{'frame': o['frame'], 'dims_mm': [float(v) for v in o['dims_mm']]} for o in value]
+
+
 def _joints(value, label):
     if not isinstance(value, list) or len(value) != 6 or any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) for v in value):
         raise ValueError(label+' needs six finite joint angles (degrees)')
@@ -49,6 +58,14 @@ class Settings:
     pick_retries: int = 3  # re-picks when the holding sensor shows no seal or a drop at the lift
     seal_settle_s: float = 0.5  # extra time on the cube after the sensor first reports a seal
     clearance_mm: float = 100.0
+    # Machine scene obstacles the carried cube must clear. Poses are read live from the frame
+    # system every cycle (recalibrations apply at once); dims are the components' box sizes.
+    # The builtin planner does not check a WorldState-attached cube against frame-system
+    # geometry, so these are added to the plan request explicitly.
+    workcell_obstacles: list = field(default_factory=lambda: [
+        {'frame': 'wall-front', 'dims_mm': [100.0, 3000.0, 1600.0]},
+        {'frame': 'ceiling', 'dims_mm': [3000.0, 3000.0, 100.0]}])
+    carry_clearance_mm: float = 25.0  # swept-cube check margin against those obstacles
     box_entry_clearance_mm: float = 30.0
     # Camera sweep when the cube is not fully seen from the overview: sideways shifts (dx, dy mm)
     # of the overview camera at the same height and orientation, and the sweep speed.
@@ -102,6 +119,8 @@ class Settings:
             pick_retries=int(_number(attrs, 'pick_retries', 3, 0, 5)),
             seal_settle_s=_number(attrs, 'seal_settle_s', 0.5, 0, 5),
             clearance_mm=_number(attrs, 'clearance_mm', 100, 30, 300),
+            workcell_obstacles=_obstacles(attrs.get('workcell_obstacles')),
+            carry_clearance_mm=_number(attrs, 'carry_clearance_mm', 25, 0, 200),
             box_entry_clearance_mm=_number(attrs, 'box_entry_clearance_mm', 30, 10, 200),
             release_above_goal_mm=_number(attrs, 'release_above_goal_mm', 0, 0, 50),
             sweep_offsets_mm=_offsets(attrs.get('sweep_offsets_mm', [[0, 120], [0, 240], [0, 330], [0, -120], [100, 0]])),

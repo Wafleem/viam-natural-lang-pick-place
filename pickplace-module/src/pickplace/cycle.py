@@ -10,6 +10,7 @@ report a seal, the lift is checked with it, and a missed seal or a drop triggers
 the motion planner.
 """
 import asyncio
+import math
 import copy
 import json
 import time
@@ -421,9 +422,22 @@ class PickPlaceCycle:
         self.event('settling_camera')
         await asyncio.sleep(1)
 
+    async def workcell_scene(self):
+        """Live world poses of the machine's wall/ceiling frames -> [(frame, xyz, dims, yaw)]."""
+        scene = []
+        for o in self.s.workcell_obstacles:
+            try:
+                p = await self.pose(o['frame'], 'world')
+            except Exception as e:
+                raise CycleError(f'Scene obstacle {o["frame"]} not found in the frame system: {e}') from e
+            T = np.array(pose_matrix(p))
+            scene.append((o['frame'], T[:3, 3].tolist(), o['dims_mm'], math.degrees(math.atan2(T[1, 0], T[0, 0]))))
+        return scene
+
     async def plan(self, goal, observation=None, start=None, source=None):
         """Plan the full cycle from `start` (default: current joints). No motion."""
-        planner = Planner(self.motion, self.s, self.kin)
+        self.workcell = await self.workcell_scene()
+        planner = Planner(self.motion, self.s, self.kin, self.workcell)
         observation = observation or self.observation
         start = start or await self.joints()
         self.event('planning', goal=goal)

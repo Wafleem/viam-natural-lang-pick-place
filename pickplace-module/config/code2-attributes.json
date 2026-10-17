@@ -85,9 +85,9 @@
   "release_dwell_s": 1.0,
   "clearance_mm": 100,
   "travel_speed_deg_s": 20,
-  "approach_speed_deg_s": 6,
+  "approach_speed_deg_s": 8,
   "press_speed_deg_s": 1,
-  "acceleration_deg_s2": 6,
+  "acceleration_deg_s2": 15,
   "joint_limit_margin_deg": 5,
   "lease_service": "code-1",
   "boxes": [
@@ -125,5 +125,7 @@
     "diameter_mm": 236,
     "height_mm": 25
   },
-  "pick_retries": 3
+  "pick_retries": 3,
+  "sweep_speed_deg_s": 18,
+  "carry_clearance_mm": 25
 }
