@@ -156,6 +156,7 @@
       <button class="flow" onclick="flow('box')">CUBE → BOX<small>sweep → pick → place → park at overview</small></button>
       <button class="flow" onclick="flow('pink')">CUBE → PINK<small>box on the wall: slide in level → park</small></button>
       <button class="flow" onclick="flow('ring')">CUBE → RING<small>sweep → pick → place → park at overview</small></button>
+      <button class="flow safe" onclick="flow('sethome')">CUBE IS HOME<small>no motion: I put it back on the home spot myself</small></button>
       <button class="flow" onclick="flow('home')">CUBE → HOME<small>reset_cube: from the orange box, pink box, ring or the table</small></button>
       <button class="flow" onclick="flow('tour')">FULL TOUR<small>box → home → ring → home</small></button>
       <button class="flow" onclick="flow('hover')">HOVER TEST<small>hold the cube over the box, then set it back</small></button>
@@ -379,7 +380,11 @@ async function cmd(c, moves) {
 async function sendRaw() {
   let c; try { c = JSON.parse(val('raw')); } catch (e) { toast('Invalid JSON: ' + e.message, true); return; }
   if (c.workcell_ready && needClear()) return;
-  try { const r = await api('/api/command', c); $('reply').textContent = pretty(r); if (r.error) toast(r.error, true); }
+  if (c.workcell_ready && !c.request_id) c.request_id = 'ui-' + Date.now() + '-' + c.action;
+  try { const r = await api('/api/command', c); $('reply').textContent = pretty(r); if (r.error) { toast(r.error, true); return; }
+    if (c.workcell_ready && r.accepted !== false) {  // a moving command: follow it to the end and say how it went
+      try { await waitIdle(c.action, c.request_id); toast(c.action + ' finished'); say('ok', c.action + ' finished.'); }
+      catch (e) { toast(e.message, true); say('bad', e.message); } } }
   catch (e) { $('reply').textContent = 'Error: ' + e.message; toast(e.message, true); }
 }
 async function stopAll() { try { await api('/api/command', {action:'stop'}); } catch (e) {} try { await api('/api/arm/stop', {}); toast('Stop sent'); } catch (e) { toast('Stop error: ' + e.message, true); } }
@@ -617,17 +622,25 @@ async function loadDescribe() {
 // ---- full flows: each step waits for code-2 to finish; any failure stops the flow
 let flowAbort = false;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-async function waitIdle(label) {
+async function waitIdle(label, reqId) {
   for (let i = 0; i < 900; i++) { if (flowAbort) throw new Error('aborted');
-    const s = await api('/api/command', {action:'status'}); if (!s.busy) { if (s.state === 'failed' || s.state === 'stopped') throw new Error(s.error || s.state); return s; }
+    let s; try { s = await api('/api/command', {action:'status'}); } catch (e) { await sleep(1000); continue; }  // code-2 restarting: keep asking
+    if (!s.busy) {
+      if (s.state === 'failed' || s.state === 'stopped') throw new Error(s.error || s.state);
+      // Durable check: idle is not "done". code-2 must report THIS request as complete; a restart
+      // (or another client) mid-command shows up here instead of silently looking finished.
+      if (reqId && (s.request_id !== reqId || s.state !== 'complete'))
+        throw new Error(label + ' was interrupted (code-2 restarted or another command took over). Nothing is lost: send it again.');
+      return s; }
     await sleep(1000); }
   throw new Error(label + ' timed out');
 }
 function stepLine(text, cls) { const li = document.createElement('li'); li.textContent = text; li.className = cls || 'run'; $('flowsteps').appendChild(li); return li; }
 async function step(label, fn) { const li = stepLine('… ' + label); try { const r = await fn(); li.textContent = '✓ ' + label; li.className = 'ok'; return r; }
   catch (e) { li.textContent = '✗ ' + label + ' — ' + e.message; li.className = 'bad'; throw e; } }
-const go = (action, extra) => async () => { const r = await api('/api/command', {action, ...extra, workcell_ready:true, request_id:'flow-' + Date.now() + '-' + action});
-  if (r.accepted === false) throw new Error(r.already_running ? 'code-2 busy' : 'duplicate'); return waitIdle(action); };
+const go = (action, extra) => async () => { const request_id = 'flow-' + Date.now() + '-' + action;
+  const r = await api('/api/command', {action, ...extra, workcell_ready:true, request_id});
+  if (r.accepted === false) throw new Error(r.already_running ? 'code-2 busy' : 'duplicate'); return waitIdle(action, request_id); };
 const still = (action, extra) => async () => { await api('/api/command', {action, ...extra}); return waitIdle(action); };
 async function placeCube(goal) {
   // One command: code-2 goes to the overview, finds the cube by camera (sweeping if needed; it falls
@@ -638,6 +651,7 @@ async function placeCube(goal) {
   if (o) stepLine('vision: ' + o.detail, o.cube_left_pick_spot === false || o.cube_at_goal === false ? 'bad' : 'ok');
 }
 async function flow(name) {
+  if (name === 'sethome') { try { await api('/api/command', {action:'set_cube_location', place:'home'}); toast('code-2 now knows the cube is home (nothing moved)'); } catch (e) { toast(e.message, true); } return; }
   if (name !== 'check' && needClear()) return;
   flowAbort = false; $('flowsteps').innerHTML = ''; $('flowstate').textContent = 'running ' + name;
   try {
