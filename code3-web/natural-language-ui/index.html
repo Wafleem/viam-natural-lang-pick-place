@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="referrer" content="no-referrer"><title>Armfarm · Review and send</title>
+  <link rel="stylesheet" href="./src/style.css">
+</head>
+<body>
+<main>
+  <header><a class="wordmark" href="./">ARMFARM <span>19</span></a><span id="connection-pill" class="pill">Not connected</span></header>
+  <section class="intro"><p class="eyebrow">NATURAL LANGUAGE → COMMAND</p><h1>Say what.<br>Review. Then send.</h1><p>Translate locally. Send only after review.</p></section>
+  <section class="card connection">
+    <div class="section-title"><h2>Connect to code-2</h2><button id="disconnect" class="quiet" type="button" disabled>Disconnect</button></div>
+    <form id="connect-form" autocomplete="off">
+      <label>Connection method<select id="auth-mode"><option value="manual">Machine API key</option><option value="hosted">Viam-hosted machine session</option></select></label>
+      <div id="manual-fields" class="fields">
+        <label class="wide">Machine hostname<input id="host" placeholder="machine-main.example.viam.cloud" autocomplete="off" spellcheck="false"></label>
+        <label>API key ID<input id="key-id" type="password" autocomplete="off" spellcheck="false"></label>
+        <label>API key<input id="key" type="password" autocomplete="off" spellcheck="false"></label>
+      </div>
+      <p class="hint">Enter credentials yourself. They are not saved or logged by this app. A hosted session is read only when you choose it and press Connect.</p>
+      <button id="connect" class="secondary" type="submit">Connect &amp; read status</button>
+    </form>
+    <p id="connection-notice" class="hint" role="status">Connect only when you want to inspect code-2 and send a reviewed task.</p>
+  </section>
+  <div class="workspace">
+    <section class="card request">
+      <h2><span>01</span> Describe a task</h2>
+      <label for="instruction">Your instruction</label>
+      <textarea id="instruction" rows="5" placeholder="Pick up the cube and place it on the ring."></textarea>
+      <p id="instruction-limit" class="hint">0 / 300 characters · 0 / 60 words</p>
+      <div class="row"><button id="talk" class="secondary" type="button">Hold to speak</button><span id="speech-status" class="hint" aria-live="polite"></span></div>
+      <p class="hint">Optional speech fills the text box from final recognition. Your browser may use an external speech service. Typed translation stays in this page.</p>
+      <button id="translate" type="button" disabled>Translate locally <span aria-hidden="true">↗</span></button>
+      <p class="hint">A strict English grammar translates one instruction at a time. Translation needs no account or model; sending requires a machine connection.</p>
+    </section>
+    <section class="card review">
+      <h2><span>02</span> Inspect the meaning</h2>
+      <p id="result-state" class="eyebrow" aria-live="polite">AWAITING INPUT</p>
+      <h3 id="summary">Your translated meaning appears here.</h3>
+      <p id="result-message" class="hint">Translate an instruction to see its structured meaning.</p>
+      <pre id="command" tabindex="0" aria-label="Semantic meaning JSON">No translation yet.</pre>
+      <button id="copy" class="secondary" type="button" disabled>Copy meaning JSON</button>
+      <p id="copy-status" class="hint" role="status"></p>
+    </section>
+  </div>
+  <section class="card command-preview">
+    <div class="section-title"><h2><span>03</span> Code-2 command preview</h2><span id="reference-version" class="pill">Source reference</span></div>
+    <p id="template-state" class="eyebrow" aria-live="polite">AWAITING TRANSLATION</p>
+    <p id="template-message" class="hint">Translate an instruction to check this source reference.</p>
+    <pre id="command-template" tabindex="0" aria-label="Code-2 command template">No command template for the current text.</pre>
+    <button id="copy-template" class="secondary" type="button" disabled>Copy command template</button>
+    <p id="template-copy-status" class="hint" role="status"></p>
+    <p class="hint">This unapproved template keeps <code>workcell_ready: false</code>. Sending a reviewed task changes it to <code>true</code> and adds one unique request ID. The exact submitted JSON appears under task status.</p>
+    <label class="ack"><input id="reviewed" type="checkbox" disabled><span>I reviewed this task and confirm the workcell is clear.</span></label>
+    <button id="send-reviewed" type="button" disabled>Send reviewed command</button>
+    <p id="send-reason" class="hint" role="status">Connect, translate and review a supported task before sending.</p>
+    <p class="motion-note">Sending starts arm movement, including the overview/search sequence and pick/place. Each send requires a separate review.</p>
+    <details><summary>What this code-2 reference supports</summary>
+      <p>Cube onto the ring (start, goal ring) or cube into the box (code-2's box_once workflow). Box tasks unlock only while code-2 reports that workflow enabled. Colors, left/right and markers are not selectable.</p>
+      <p>The full <code>start</code> workflow is overview → search → plan → pick/place. Search moves the arm; camera-only views cannot support pickup without their own calibration.</p>
+      <p>Color, rightmost/leftmost and marker qualifiers are preserved in the meaning above, but cannot be selected by this code-2 contract. Box placement is unsupported.</p>
+    </details>
+  </section>
+  <section class="card task-status">
+    <div class="section-title"><h2>Task status</h2><button id="refresh-status" class="secondary" type="button" disabled>Refresh status</button></div>
+    <dl class="status-grid"><div><dt>Code-2 state</dt><dd id="machine-state">No current status</dd></div><div><dt>Stage</dt><dd id="machine-stage">—</dd></div><div><dt>This send</dt><dd id="request-state">Nothing sent</dd></div><div><dt>Tracked request ID</dt><dd id="request-id">—</dd></div><div><dt>Observed request ID</dt><dd id="observed-request-id">—</dd></div></dl>
+    <p id="status-error" role="alert" hidden></p>
+    <p id="status-message" role="status">No command is sent by translation, connection or status refresh.</p>
+    <details><summary>Exact last submitted command</summary><pre id="last-command">No command sent from this page.</pre></details>
+    <p class="hint">Only an unresolved request ID is retained in this tab across reloads; credentials are never stored. A timeout or lost connection can leave the result unknown. Reconnect and inspect status; this app never retries a movement command automatically. Disconnecting does not confirm a physical stop.</p>
+  </section>
+  <section class="card">
+    <p class="eyebrow">TRY A PHRASE</p>
+    <div class="examples"><button class="secondary example" type="button">Move the cube to the ring</button><button class="secondary example" type="button">Move the white cube to the ring</button><button class="secondary example" type="button">Put the rightmost cube inside the box</button><button class="secondary example" type="button">Pick up the cube</button></div>
+    <p class="hint">Selectors describe words, not observed objects. Translation does not inspect a camera, locate objects or plan movement. Sending invokes code-2’s existing workflow. Semantic JSON is distinct from a code-2 command. Neither preview establishes that a task is physically possible.</p>
+  </section>
+  <footer>REVIEWED COMMAND CONSOLE <a href="./translator.html">Open offline translator · no connection controls</a></footer>
+</main>
+<script type="module" src="./src/app.js"></script>
+</body>
+</html>
