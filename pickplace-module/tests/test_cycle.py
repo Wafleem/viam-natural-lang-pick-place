@@ -117,6 +117,7 @@ def make_cycle(settings, kin, urdf, joints):
         ('wall-front', 'world'): lambda: pif('world', {'x': 1000, 'y': 51, 'z': 454, 'o_z': 1}),  # the fake planner can't route around it
         ('wall-front-2', 'world'): lambda: pif('world', {'x': 1100, 'y': 51, 'z': 615.5, 'o_z': 1}),
         ('ceiling', 'world'): lambda: pif('world', {'z': 1304, 'o_z': 1}),
+        **{(f'box-shell-{n}', 'world'): (lambda: pif('world', {'x': 1500, 'y': 51, 'z': 689, 'o_z': 1})) for n in ('floor', 'top', 'back', 'left', 'right')},
         ('cardboard-box', 'world'): lambda: pif('world', {'x': 1200, 'y': 51, 'z': 888.5, 'o_z': 1}),
         ('cardboard-box', 'world'): lambda: pif('world', {'x': 1200, 'y': 51, 'z': 888.5, 'o_z': 1}),
     }
@@ -203,7 +204,7 @@ def test_service_command_guards(settings, kin, urdf, attrs):
     with pytest.raises(ValueError, match='goal must be one of'):
         asyncio.run(svc.do_command({'action': 'run', 'goal': 'shelf', 'workcell_ready': True}))
     status = asyncio.run(svc.do_command({'action': 'status'}))
-    assert status['goals'] == ['home', 'ring', 'box']
+    assert status['goals'] == ['home', 'ring', 'box', 'pink']
     assert status['suction'] == {'mode': 'closed_loop', 'holding_feedback_used': True, 'press_depth_mm': settings.press_depth_mm,
                                  'suction_dwell_s': settings.suction_dwell_s, 'seal_settle_s': settings.seal_settle_s,
                                  'pick_retries': settings.pick_retries, 'release_dwell_s': settings.release_dwell_s}

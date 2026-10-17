@@ -609,22 +609,83 @@ class PickPlaceCycle:
             self.remember(goal, outcome)
             self.event('complete', goal=goal, **outcome)
             return {**copy.deepcopy(self.plan_summary), 'outcome': outcome, 'cube_location': copy.deepcopy(self.memory.location)}
-        except BaseException:
+        except asyncio.CancelledError:  # an operator Stop: stop where we are
             if touched:
-                self.memory.set('unknown', how='cycle stopped or failed after suction on; check the workcell')
+                self.memory.set('unknown', how='cycle stopped after suction on; check the workcell')
             await self.stop_arm()
+            raise
+        except Exception as e:
+            await self.stop_arm()
+            if touched:
+                self.memory.set('unknown', how='cycle failed after suction on; check the workcell')
+                self.event('auto_recovery', result=await self.recover_after_failure(e))
             raise
         finally:
             await self.release_lease()
 
     async def _carried_segment(self, planner, start, world, **kw):
-        """A carried-cube segment that also passes the swept-cube wall/ceiling check."""
+        """A carried-cube segment that also passes the swept-cube wall/ceiling check. A side box the
+        cube is next to (its goal) is checked for real contact only (3 mm), everything else with margin."""
+        side = self.s.side_boxes.get((self.targets or {}).get('goal'))
+        panels = set(side['panels']) if side else set()
+        G = self.targets['grasp']['tcp_in_cube']
         for _ in range(5):
             path = await planner.segment(start, world, **kw)
-            if not carried_cube_violations(self.kin, path, self.targets['grasp']['tcp_in_cube'], self.s.cube_size_mm,
-                                           self.workcell, self.s.carry_clearance_mm/2):
+            bad = carried_cube_violations(self.kin, path, G, self.s.cube_size_mm, [w for w in self.workcell if w[0] not in panels], self.s.carry_clearance_mm/2)
+            bad += carried_cube_violations(self.kin, path, G, self.s.cube_size_mm, [w for w in self.workcell if w[0] in panels], 3.0)
+            if not bad:
                 return path
-        raise CycleError('Carried cube would come too close to the wall/ceiling on every plan')
+        raise CycleError('Carried cube would come too close on every plan: '+', '.join(f'{n} (gap {g:.0f} mm)' for n, g in bad))
+
+    async def set_down_at_pick(self):
+        """Recovery with the cube still gripped (a failed run, a stopped hover): carry it back, collision-
+        and sweep-checked with no upright rule (it may be level), set it down exactly where it was
+        picked, release, lift straight up and park at the overview."""
+        t = self.targets
+        if not t:
+            raise CycleError('No pick to return the cube to; take it off the cups by hand')
+        planner = Planner(self.motion, self.s, self.kin, self.workcell)
+        self.event('recovering_cube', to=[round(t['contact']['x'], 1), round(t['contact']['y'], 1)])
+        carried = scene_world(self.s, self.observation or {}, t, 'carried', t['goal'], self.workcell)
+        here = await self.joints()
+        if max(abs(a-b) for a, b in zip(here, t['q_above_pick'])) > .5:
+            back = await self._carried_segment(planner, here, carried, goal_deg=t['q_above_pick'])
+            await self.execute('recover_carry', back, self.s.travel_speed_deg_s/2)
+        allow = allowed_contacts(self.s, 'pickup', t['goal'], t['source_place'])
+        down = await self._carried_segment(planner, await self.joints(), carried, pose=t['contact'], straight=True, allow=allow)
+        await self.execute('recover_set_down', down, self.s.approach_speed_deg_s)
+        await self.suction_off()
+        up = await planner.segment(await self.joints(), scene_world(self.s, self.observation or {}, t, 'at_pick', t['goal'], self.workcell),
+                                   pose=t['above_pick'], straight=True, allow=allow)
+        await self.execute('recover_retract', up, self.s.approach_speed_deg_s)
+        self.memory.set(t['source_place'] if t['source_place'] in ('table', 'home') else 'unknown', how='set back on its pick spot after a failure')
+        await self.go_to_overview(planner)
+        self.event('recovered_cube')
+
+    async def recover_after_failure(self, error):
+        """Never leave the cube hanging: put a still-gripped cube back where it was picked, or (dropped /
+        released) just park at the overview. Never raises; returns what it did."""
+        try:
+            if await self.holding():
+                await self.set_down_at_pick()
+                return 'cube set back on its pick spot; arm parked at the overview'
+            await self.go_to_overview(Planner(self.motion, self.s, self.kin))
+            return 'arm parked at the overview (no cube on the cups)'
+        except Exception as e:
+            self.event('recovery_failed', error=str(e)[:150])
+            await self.stop_arm()
+            return 'automatic recovery failed: '+str(e)[:150]
+
+    async def recover_cube(self):
+        """Operator command: hold-safe recovery from wherever the arm stopped."""
+        self.events = []
+        await self.preflight()
+        await self.acquire_lease()
+        try:
+            self.workcell = await self.workcell_scene()
+            return {'recovery': await self.recover_after_failure(None)}
+        finally:
+            await self.release_lease()
 
     async def hover_trial(self, goal, select='only', seconds=30.0):
         """Placement check without placing. Pick the cube, carry it to above the goal (its bottom
@@ -667,7 +728,8 @@ class PickPlaceCycle:
             if not info['still_held']:
                 raise CycleError('The cube dropped while hovering')
             carried = scene_world(self.s, self.observation, t, 'carried', goal, self.workcell)
-            back = await self._carried_segment(planner, await self.joints(), carried, goal_deg=t['q_above_pick'], upright=self.s.carry_upright_deg)
+            back = await self._carried_segment(planner, await self.joints(), carried, goal_deg=t['q_above_pick'],
+                                               upright=None if goal in self.s.side_boxes else self.s.carry_upright_deg)
             await self.execute('return_to_pick', back, self.s.travel_speed_deg_s)
             down = await self._carried_segment(planner, await self.joints(), carried, pose=t['contact'], straight=True,
                                                allow=allowed_contacts(self.s, 'pickup', goal, t['source_place']))
@@ -681,13 +743,114 @@ class PickPlaceCycle:
             await self.go_to_overview(planner)
             self.event('complete', goal=goal, hover_trial=True)
             return {'hover': info, 'seal_seconds': sealed, 'cube_location': copy.deepcopy(self.memory.location)}
-        except BaseException:
+        except asyncio.CancelledError:
             if touched:
                 self.memory.set('unknown', how='hover trial stopped with the cube gripped; check the workcell')
             await self.stop_arm()
             raise
+        except Exception as e:
+            await self.stop_arm()
+            if touched:
+                self.memory.set('unknown', how='hover trial failed with the cube gripped')
+                self.event('auto_recovery', result=await self.recover_after_failure(e))
+            raise
         finally:
             await self.release_lease()
+
+    async def retrieve_from_side(self, name, dry=False):
+        """Cube placed in a side box by code-2 -> home spot. Reverse of the placement: level empty
+        approach, straight slide to the gripped face, suction + short press (the cube is backed by the
+        box's back wall), wait for the seal, lift a little off the floor, slide straight out, carry to
+        the home spot and set it down tool-down, then park at the overview."""
+        from .grasp_geometry import place_tcp
+        from .task import side_releases, side_slide_joints, _travel
+        s, loc = self.s, copy.deepcopy(self.memory.location)
+        side = s.side_boxes[name]
+        G = {'tcp_in_cube': loc['tcp_in_cube']}
+        options = [o for o in side_releases(s, side, G) if abs((o[0]-loc['yaw_deg']+180) % 360-180) < 1] or side_releases(s, side, G)
+        label, contact, pre = options[0]
+        rest_z = side['floor_z_mm']+s.cube_size_mm/2+5  # resting on the floor (it dropped release_above_floor_mm); cups 5 mm above centre
+        contact, pre = {**contact, 'z': rest_z}, {**pre, 'z': rest_z}
+        q_contact, q_pre = side_slide_joints(self.kin, contact, pre, s.joint_limit_margin_deg)
+        press = {**contact, 'x': contact['x']+15.0}
+        lifted = {**contact, 'z': contact['z']+12.0}
+        out = {**pre, 'z': pre['z']+12.0}
+        q_out = self.kin.ik(out, q_pre, s.joint_limit_margin_deg)
+        # home placement, tool down, with the same grip
+        home_top = np.array([*s.home['xy_mm'], s.calibration['pickup_tcp_z_mm']])
+        best = None
+        for k in range(4):
+            yaw = s.home['yaw_deg']+90*k
+            rel = place_tcp(home_top, yaw, G)
+            above = {**rel, 'z': rel['z']+s.clearance_mm}
+            try:
+                qa = self.kin.ik(above, q_out, s.joint_limit_margin_deg)
+                self.kin.ik(rel, qa, s.joint_limit_margin_deg)
+            except ValueError:
+                continue
+            if best is None or _travel(qa, q_out) < best[0]:
+                best = (_travel(qa, q_out), yaw, rel, above, qa)
+        if best is None:
+            raise CycleError('Home spot not reachable with this grip')
+        _, yaw, release, above, q_above = best
+        gripped_face = [loc['top_world_mm'][0], loc['top_world_mm'][1], rest_z]
+        t = {'goal': name, 'source_place': name, 'cube_top_world_mm': gripped_face, 'goal_top_world_mm': home_top.tolist(),
+             'cube_yaw_deg': float(label), 'place_yaw_deg': float(yaw), 'contact': contact, 'press': press,
+             'above_pick': out, 'q_above_pick': q_out, 'release': release, 'above_place': above, 'q_above_place': q_above,
+             'grasp': {'tcp_in_cube': loc['tcp_in_cube']}}
+        self.targets = t
+        planner = Planner(self.motion, s, self.kin, self.workcell)
+        empty_world = scene_world(s, {}, {**t, 'goal_top_world_mm': gripped_face, 'place_yaw_deg': float(label)}, 'placed', name, self.workcell)
+        carried_side = scene_world(s, {}, t, 'carried', name, self.workcell)
+        carried_home = scene_world(s, {}, {**t, 'goal': 'home'}, 'carried', 'home', self.workcell)
+        touch = [(s.gripper, 'vision-cube')]
+        cur = await self.joints()
+
+        async def go(label, path, speed):
+            nonlocal cur
+            if not dry:
+                await self.execute(label, path, speed)
+            cur = path[-1]
+        plan_log = []
+        path = await planner.segment(cur, empty_world, goal_deg=q_pre)
+        await go('approach_side', path, s.travel_speed_deg_s)
+        path = await planner.segment(cur, empty_world, pose=contact, straight=True, allow=touch)
+        await go('slide_in', path, s.approach_speed_deg_s)
+        if not dry:
+            await self.suction_on()
+        path = await planner.segment(cur, empty_world, pose=press, straight=True, allow=touch+[('vision-cube', 'scene-box-shell-back'), ('vision-cube', 'scene-wall-front-2')])
+        await go('press', path, s.press_speed_deg_s)
+        sealed = 0.0 if dry else await self.wait_for_seal()
+        self.event('seal', attempt=1, sealed=sealed is not None, seconds=sealed)
+        if sealed is None:
+            await self.suction_off()
+            raise CycleError('No seal on the cube in the side box; it is still there')
+        # The cube stopped at the back wall and the cups compressed: back off the press first (planned
+        # with the cube as a static obstacle) so the cube sits on the cups exactly as modelled.
+        path = await planner.segment(cur, empty_world, pose=contact, straight=True, allow=touch+[('vision-cube', 'scene-box-shell-back'), ('vision-cube', 'scene-wall-front-2')])
+        await go('unpress', path, s.approach_speed_deg_s)
+        floor = ['scene-'+f for f in side['panels'] if 'floor' in f]
+        for name_, goal_pose in (('lift_off_floor', lifted), ('slide_out', out)):
+            path = await self._carried_segment(planner, cur, carried_side, pose=goal_pose, straight=True,
+                                               allow=[(s.gripper, 'vision-cube')]+[('vision-cube', f) for f in floor])
+            await go(name_, path, s.approach_speed_deg_s)
+        if not dry and not await self.holding():
+            raise CycleError('The holding sensor lost the cube on the way out')
+        path = await self._carried_segment(planner, cur, carried_home, goal_deg=q_above)  # still exempt near the box it left
+        await go('transfer', path, s.travel_speed_deg_s)
+        self.targets = {**t, 'goal': 'home'}
+        path = await self._carried_segment(planner, cur, carried_home, pose=release, straight=True, allow=allowed_contacts(s, 'place', 'home'))
+        await go('place', path, s.approach_speed_deg_s)
+        if dry:
+            return {'dry_run': True, 'planned': 'approach_side, slide_in, press, lift_off_floor, slide_out, transfer, place'}
+        await self.suction_off()
+        self.memory.set('home', home_top.tolist(), float(yaw), loc['tcp_in_cube'], how='brought back from '+name)
+        placed = scene_world(s, {}, {**t, 'goal': 'home'}, 'placed', 'home', self.workcell)
+        path = await planner.segment(cur, placed, pose=above, straight=True, allow=allowed_contacts(s, 'place', 'home'))
+        await go('retract', path, s.approach_speed_deg_s)
+        await self.go_to_overview(planner)
+        self.event('complete', goal='home', source=name)
+        return {'moved': True, 'from': name, 'cube_location': copy.deepcopy(self.memory.location)}
 
     def remember(self, goal, outcome):
         t = self.targets
@@ -732,6 +895,23 @@ class PickPlaceCycle:
             raise CycleError('No home spot configured (attribute "home": {"xy_mm": [x, y], "yaw_deg": a})')
         # Looks first, then really resets: from the box, the ring or anywhere on the table onto the
         # home spot. Only a cube already within 15 mm of the spot is left alone.
+        place = self.memory.location.get('place')
+        if place in self.s.side_boxes and self.memory.location.get('tcp_in_cube'):
+            self.events = []
+            await self.preflight()
+            await self.acquire_lease()
+            try:
+                self.workcell = await self.workcell_scene()
+                return await self.retrieve_from_side(place)
+            except asyncio.CancelledError:
+                await self.stop_arm()
+                raise
+            except Exception:
+                await self.stop_arm()
+                self.memory.set('unknown', how='retrieval from '+place+' failed; check the workcell')
+                raise
+            finally:
+                await self.release_lease()
         return await self.run('home', on_table='skip_if_home')
 
     def set_location(self, place, goals):

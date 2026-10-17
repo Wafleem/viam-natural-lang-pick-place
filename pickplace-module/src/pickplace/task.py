@@ -79,6 +79,9 @@ def side_releases(settings, side, grasp):
         C = np.eye(4)
         C[:3, 0], C[:3, 2] = x, z
         C[:3, 1] = np.cross(z, x)
+        roll = math.radians(side.get('roll_deg', 0.0))  # fine roll about the slide axis (+x), taught by hover trials
+        Rx = np.array([[1, 0, 0], [0, math.cos(roll), -math.sin(roll)], [0, math.sin(roll), math.cos(roll)]])
+        C[:3, :3] = Rx @ C[:3, :3]
         C[:3, 3] = face
         release = matrix_pose((C @ G).tolist())
         pre = {**release, 'x': float(release['x']-back_off)}

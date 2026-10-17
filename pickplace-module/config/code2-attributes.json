@@ -255,7 +255,7 @@
       "label": "box on the wall",
       "back_x_mm": 768,
       "floor_z_mm": 575,
-      "center_y_mm": 51,
+      "center_y_mm": 38.3,
       "opening_y_mm": [
         -82,
         184
@@ -271,8 +271,9 @@
         "wall-front-2"
       ],
       "back_clearance_mm": 8,
-      "release_above_floor_mm": 6,
-      "entry_margin_mm": 5
+      "release_above_floor_mm": 21,
+      "entry_margin_mm": 5,
+      "roll_deg": 1.5
     }
   ]
 }

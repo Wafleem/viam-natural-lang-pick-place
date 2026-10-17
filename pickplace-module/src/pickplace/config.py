@@ -288,6 +288,7 @@ def _side_boxes(value, boxes):
         b['back_clearance_mm'] = _number(raw, 'back_clearance_mm', 25, 0, 200)
         b['release_above_floor_mm'] = _number(raw, 'release_above_floor_mm', 6, 0, 30)
         b['entry_margin_mm'] = _number(raw, 'entry_margin_mm', 15, 0, 200)
+        b['roll_deg'] = _number(raw, 'roll_deg', 0, -10, 10)
         result[name] = b
     return result
 
