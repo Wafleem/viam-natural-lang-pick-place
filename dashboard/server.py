@@ -183,6 +183,25 @@ async def jog(request):
         return fail(f'{type(e).__name__}: {e}')
 
 
+ARM_DIAGNOSTICS = {'get_state', 'get_error', 'clear_error', 'get_vacuum_state'}
+
+
+async def arm_do(request):
+    """viam:ufactory driver DoCommands that never move the arm: state, error, clear_error and
+    vacuum state (optionally with connection_type plugin/contact to compare the wiring)."""
+    body = await request.json()
+    key = body.get('command')
+    if key not in ARM_DIAGNOSTICS:
+        return fail('command must be one of '+', '.join(sorted(ARM_DIAGNOSTICS)))
+    cmd = {key: True}
+    if key == 'get_vacuum_state' and body.get('connection_type') in ('plugin', 'contact'):
+        cmd['connection_type'] = body['connection_type']
+    try:
+        return ok(await call(lambda r: Arm.from_robot(r, 'arm').do_command(cmd, timeout=10)))
+    except Exception as e:
+        return fail(f'{type(e).__name__}: {e}')
+
+
 async def arm_stop(_):
     try:
         await call(lambda r: Arm.from_robot(r, 'arm').stop(timeout=5))
@@ -248,7 +267,7 @@ def main():
     args = p.parse_args()
     app = web.Application()
     app.add_routes([web.get('/', index), web.get('/api/state', state), web.post('/api/command', command), web.post('/api/nl', nl),
-                    web.get('/api/camera', camera), web.post('/api/arm/jog', jog), web.post('/api/arm/stop', arm_stop),
+                    web.get('/api/camera', camera), web.post('/api/arm/jog', jog), web.post('/api/arm/stop', arm_stop), web.post('/api/arm/do', arm_do),
                     web.post('/api/gripper', gripper), web.get('/api/config', get_config), web.post('/api/config', put_config)])
     app.on_cleanup.append(lambda _: ROBOT.drop())
     print(f'Dashboard: http://localhost:{args.port}')

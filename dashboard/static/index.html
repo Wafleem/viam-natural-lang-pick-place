@@ -103,7 +103,20 @@
     <h2>Gripper (vacuum)</h2>
     <div class="row"><button class="move" onclick="grip('grab')">Suction on</button>
       <button onclick="grip('open')">Suction off</button></div>
-    <p class="muted">Open loop: there is no reliable "holding" reading.</p>
+    <p class="muted">Open loop: code-2 never reads "holding".</p>
+    <div class="row">Vacuum reading via wiring:
+      <button onclick="armdo('get_vacuum_state','contact')">contact</button>
+      <button onclick="armdo('get_vacuum_state','plugin')">plugin</button></div>
+    <p class="muted">Diagnose the feedback: with suction on and a cube sealed, one wiring mode should read true.
+      The driver auto-selects "contact" on this arm; if only "plugin" reads correctly, set the gripper's connection_type.</p>
+  </section>
+
+  <section>
+    <h2>xArm controller</h2>
+    <div class="row"><button onclick="armdo('get_state')">get_state</button>
+      <button onclick="armdo('get_error')">get_error</button>
+      <button onclick="armdo('clear_error')">clear_error</button></div>
+    <p class="muted">After releasing the e-stop: clear_error, then code-2 recover_limits (if a joint is at its limit), then reset.</p>
   </section>
 
   <section class="wide">
@@ -166,6 +179,9 @@ async function jog(joint, sign) {
 async function grip(action) {
   if (action === 'grab' && !$('clear').checked) { show('reply', 'Tick "workcell clear" first.'); return; }
   try { show('reply', await api('/api/gripper', {action})); } catch (e) { show('reply', 'Gripper error: ' + e.message); }
+}
+async function armdo(command, connection_type) {
+  try { show('reply', await api('/api/arm/do', {command, connection_type})); } catch (e) { show('reply', 'Arm error: ' + e.message); }
 }
 function snap() { $('cam').src = '/api/camera?t=' + Date.now(); }
 async function loadConfig() {

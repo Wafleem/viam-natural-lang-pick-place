@@ -90,6 +90,7 @@ def compute_targets(settings, observation, goal, kinematics, start_joints_deg):
         if box is not None:
             check_cube_fits(box, size, goal_top, place_yaw)
         release = place_tcp(goal_top, place_yaw, grasp)
+        release['z'] += s.release_above_goal_mm  # optional drop height (default 0)
         above = {**release, 'z': above_place_z}
         try:
             q = kinematics.ik(above, q_above_pick, margin)
