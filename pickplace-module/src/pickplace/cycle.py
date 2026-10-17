@@ -238,6 +238,23 @@ class PickPlaceCycle:
             self.event('arm_stop_error', error=str(e))
 
     # ---- commands ----------------------------------------------------------
+    async def verify_pickup(self):
+        """Vision stands in for the unreliable suction sensor: back at the overview, is a cube
+        still where we picked it? Never raises; reports what it saw."""
+        picked = self.observation.get('cube', {}).get('top_center_world_mm')
+        if picked is None:
+            return {'cube_left_pick_spot': None, 'detail': 'no pick position recorded'}
+        await asyncio.sleep(.5)
+        try:
+            obs = await self.capture(require_ring=False, select='nearest')
+        except Exception as e:
+            return {'cube_left_pick_spot': None, 'detail': f'check failed: {e}'}
+        remaining = [c for c in obs.get('cubes', [])
+                     if np.linalg.norm(np.subtract(c['top_center_world_mm'][:2], picked[:2])) < 40]
+        if remaining:
+            return {'cube_left_pick_spot': False, 'detail': 'a cube is still at the pick spot: suction likely did not hold'}
+        return {'cube_left_pick_spot': True, 'detail': 'pick spot is empty', 'cubes_still_visible': len(obs.get('cubes', []))}
+
     async def recover_limits(self):
         """Move ONLY joints sitting inside the limit margin (<= margin + 1 deg) back into range.
 
@@ -256,6 +273,12 @@ class PickPlaceCycle:
             raise CycleError('A joint is too far outside its range for automatic recovery; jog it manually')
         await self.acquire_lease()
         try:
+            # After a limit fault (and a released e-stop) the controller stays in error until
+            # cleared; the viam:ufactory driver exposes that as an arm DoCommand.
+            try:
+                self.event('clear_error', reply=await self.arm.do_command({'clear_error': True}, timeout=10))
+            except Exception as e:
+                self.event('clear_error_failed', error=str(e))
             await self.suction_off()
             self.event('recover_limits', target=target)
             await self.arm.move_through_joint_positions(
@@ -316,8 +339,9 @@ class PickPlaceCycle:
             await self.suction_off()
             for name in ('retract', 'return'):
                 await self.execute(name, *plans[name])
-            self.event('complete', goal=goal)
-            return copy.deepcopy(self.plan_summary)
+            outcome = await self.verify_pickup()
+            self.event('complete', goal=goal, **outcome)
+            return {**copy.deepcopy(self.plan_summary), 'outcome': outcome}
         except BaseException:
             await self.stop_arm()
             raise

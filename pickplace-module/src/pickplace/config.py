@@ -45,6 +45,8 @@ class Settings:
     suction_dwell_s: float = 1.0
     release_dwell_s: float = 1.0
     clearance_mm: float = 100.0
+    box_entry_clearance_mm: float = 30.0
+    release_above_goal_mm: float = 0.0
     grasp_toward_image_top_mm: float = 0.0
     placement_correction_world_xy_mm: list = field(default_factory=lambda: [0.0, 0.0])
     placement_world_yaw_deg: float = 0.0
@@ -89,6 +91,8 @@ class Settings:
             suction_dwell_s=_number(attrs, 'suction_dwell_s', 1.0, 0, 10),
             release_dwell_s=_number(attrs, 'release_dwell_s', 1.0, 0, 10),
             clearance_mm=_number(attrs, 'clearance_mm', 100, 30, 300),
+            box_entry_clearance_mm=_number(attrs, 'box_entry_clearance_mm', 30, 10, 200),
+            release_above_goal_mm=_number(attrs, 'release_above_goal_mm', 0, 0, 50),
             grasp_toward_image_top_mm=_number(attrs, 'grasp_toward_image_top_mm', 0, 0, 20),
             placement_correction_world_xy_mm=[float(v) for v in correction],
             placement_world_yaw_deg=_number(attrs, 'placement_world_yaw_deg', 0, -180, 180),

@@ -46,6 +46,10 @@ class FakeArm:
     async def stop(self, timeout=None):
         self.moves.append(('stop', None))
 
+    async def do_command(self, command, timeout=None):
+        self.moves.append(('do_command', command))
+        return {}
+
 
 class FakeGripper:
     def __init__(self):
@@ -128,6 +132,7 @@ def test_full_cycle_open_loop_from_overview(settings, kin, urdf, goal):
         for q in path:
             assert kin.within_limits(q, .5)
             assert abs(q[3]) < 360-settings.joint_limit_margin_deg
+            assert goal != 'box' or 150 < q[3] < 210  # box cycle stays on the taught wrist branch
     assert arm.q == pytest.approx(settings.overview_joints_deg)
     assert summary['press_depth_mm'] == 10 and lease.reserved == ''
     json.dumps(summary)
@@ -155,6 +160,7 @@ def test_joint_at_limit_requires_recovery(settings, kin, urdf):
         asyncio.run(cycle.run('box'))
     assert arm.moves[-1] == ('stop', None)
     result = asyncio.run(cycle.recover_limits())
+    assert ('do_command', {'clear_error': True}) in arm.moves
     assert result['to'][3] == pytest.approx(360-settings.joint_limit_margin_deg)
     assert result['to'][:3] == pytest.approx(FAILED_LIFT[:3]) and result['to'][4:] == pytest.approx(FAILED_LIFT[4:])
     assert arm.moves[-1][1] == 2
@@ -230,3 +236,21 @@ def test_transient_read_errors_are_retried_but_moves_are_not(settings, kin, urdf
     fails['n'] = 5
     with pytest.raises(RuntimeError, match='Emergency'):
         asyncio.run(cycle.joints())
+
+
+def test_vision_outcome_check_reports_cube_left_behind(settings, kin, urdf):
+    # The fake camera keeps showing the cube where it started, as if suction never held.
+    cycle, *_ = make_cycle(settings, kin, urdf, settings.overview_joints_deg)
+    result = asyncio.run(cycle.run('box'))
+    assert result['outcome']['cube_left_pick_spot'] is False
+    assert 'did not hold' in result['outcome']['detail']
+
+
+def test_release_height_option(attrs, observation, kin):
+    from pickplace.config import Settings
+    from pickplace.task import compute_targets
+    base = Settings.from_attributes(attrs)
+    raised = Settings.from_attributes({**attrs, 'release_above_goal_mm': 15})
+    a = compute_targets(base, observation, 'box', kin, base.overview_joints_deg)['release']['z']
+    b = compute_targets(raised, observation, 'box', kin, base.overview_joints_deg)['release']['z']
+    assert b-a == pytest.approx(15)
