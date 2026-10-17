@@ -139,44 +139,41 @@ def consensus_observation(observations):
     result['detection_quality']={'frames':5,'agreeing_frames':int(good.sum()),'max_inlier_center_deviation_mm':float(max(dc[good].max(),dr[good].max())),'max_inlier_edge_deviation_deg':float(da[good].max())}
     return result
 
-def analyze(bgr,depth,props,camera_pose,attrs,require_ring=True):
-    """Locate the white cube (top face) and, when visible, the black ring.
+CUBE_SELECTORS = ('only', 'left', 'right', 'nearest', 'farthest')
 
-    attrs supplies cube_size_mm and table_z_mm. The ring is required for ring goals;
-    for box goals it is optional and only used as a collision obstacle.
+
+def select_cube(cubes, selector='only'):
+    """Pick one measured cube. 'left'/'right' are as seen in the overview camera image.
+
+    selector: 'only' (exactly one cube must be visible), 'left', 'right', 'nearest' /
+    'farthest' (XY distance from the arm base), or {'index': i} counted left to right.
     """
-    if bgr.shape[:2]!=depth.shape:raise ValueError('Color/depth sizes differ')
-    intr=intrinsics(props,depth.shape)
-    cloud=world_cloud(depth,intr,camera_pose)
-    valid=(depth>150)&(depth<1800)&np.isfinite(depth)
-    cubes,rings=find_objects(bgr)
-    result={'cube_count':len(cubes),'ring_count':len(rings),'issues':[],
-            'camera_pose_world':camera_pose,'camera_intrinsics':intr,'nominal_cube_size_mm':attrs.get('cube_size_mm',200)}
-    if len(cubes)!=1:result['issues'].append('Need exactly one full cube in view')
-    if len(rings)>1 or (require_ring and len(rings)!=1):result['issues'].append('Need exactly one full ring in view')
-    if result['issues']:return native(result)
-    h,w=depth.shape;cube=cubes[0];ring=rings[0] if rings else None
-    for label,obj in [('cube',cube),('ring',ring)]:
-        if obj is None:continue
-        x,y,bw,bh=obj['bbox']
-        if min(x,y)<8 or x+bw>w-8 or y+bh>h-8:
-            result['issues'].append(label+' is clipped by image edge')
-    if result['issues']:return native(result)
-    cube_mask=np.zeros(depth.shape,np.uint8);cv2.fillConvexPoly(cube_mask,np.asarray(cube['box'],np.int32),1)
-    ring_outer=np.zeros(depth.shape,np.uint8)
-    if ring is not None:cv2.ellipse(ring_outer,ring['ellipse'],1,-1)
-    hsv=cv2.cvtColor(bgr,cv2.COLOR_BGR2HSV)
-    # Table samples: white low-saturation pixels outside all object detections.
-    excluded=cv2.dilate(cube_mask|ring_outer,np.ones((35,35),np.uint8))
-    table_mask=valid&(excluded==0)&(hsv[:,:,1]<55)&(hsv[:,:,2]>100)
-    tn,td,table_points=fit_horizontal_plane(cloud[table_mask])
-    table_z=float(np.median(table_points[:,2]));result['observed_table_z_mm']=table_z
-    expected=attrs.get('table_z_mm',-23)
-    result['table_reference_error_mm']=table_z-expected
-    if abs(table_z-expected)>15:result['issues'].append('Depth/world tabletop differs from configured table by more than 15 mm; camera calibration needs verification')
+    if not cubes:
+        raise ValueError('No cube in view')
+    ordered = sorted(cubes, key=lambda c: c['pixel_hint'][0])
+    if isinstance(selector, dict) and isinstance(selector.get('index'), (int, float)) and not isinstance(selector.get('index'), bool):
+        i = int(selector['index'])
+        if not 0 <= i < len(ordered):
+            raise ValueError(f'Cube index {i} out of range; {len(ordered)} cube(s) visible')
+        return ordered[i]
+    if selector == 'only':
+        if len(cubes) != 1:
+            raise ValueError(f'{len(cubes)} cubes visible; say which one (left, right, nearest, farthest or index)')
+        return cubes[0]
+    if selector in ('left', 'right'):
+        return ordered[0] if selector == 'left' else ordered[-1]
+    if selector in ('nearest', 'farthest'):
+        key = lambda c: math.hypot(*c['top_center_world_mm'][:2])
+        return min(cubes, key=key) if selector == 'nearest' else max(cubes, key=key)
+    raise ValueError('Unknown cube selector; use one of '+', '.join(CUBE_SELECTORS)+' or {"index": n}')
+
+
+def _measure_cube(cube,bgr,valid,cloud,hsv,table_z,intr,camera_pose,nominal):
+    """Top-face centre, yaw and size of one detected cube; raises ValueError if unusable."""
+    h,w=valid.shape
+    cube_mask=np.zeros(valid.shape,np.uint8);cv2.fillConvexPoly(cube_mask,np.asarray(cube['box'],np.int32),1)
     # Refine the cube using its horizontal TOP surface in 3D, not the 2D rectangle
     # that can include a visible side face. This also gives the edge yaw in world.
-    nominal=float(attrs.get('cube_size_mm',200))
     top_mask=valid&(cube_mask>0)&(cloud[:,:,2]>table_z+nominal*.65)&(cloud[:,:,2]<table_z+nominal*1.3)
     cn,cd,top_points=fit_horizontal_plane(cloud[top_mask])
     # The detector encloses printed corner marks, not the whole top face.
@@ -188,19 +185,65 @@ def analyze(bgr,depth,props,camera_pose,attrs,require_ring=True):
     face=labels==max(candidates)[1]
     rows,cols=np.nonzero(face)
     if min(rows.min(),cols.min())<8 or rows.max()>=h-8 or cols.max()>=w-8:
-        result['issues'].append('cube top surface is clipped by image edge')
-        return native(result)
-    top_points=cloud[face]
-    xy=top_points[:,:2]
+        raise ValueError('cube top surface is clipped by image edge')
+    xy=cloud[face][:,:2]
     center_xy,dims,yaw=fit_top_rectangle(xy)
     center=np.array([*center_xy,0.]);center[2]=(cd-cn[0]*center[0]-cn[1]*center[1])/cn[2]
-    try:validate_face_corners(xy,yaw,cn,cd,intr,camera_pose,(h,w))
+    validate_face_corners(xy,yaw,cn,cd,intr,camera_pose,(h,w))
+    observed_height=float(center[2]-table_z)
+    if not all(nominal*.75<d<nominal*1.2 for d in dims):raise ValueError('Detected cube top dimensions do not match nominal ore size')
+    if abs(observed_height-nominal)>20:raise ValueError('Cube height does not match nominal ore size')
+    return {'top_center_world_mm':center,'world_yaw_deg':yaw,'top_dimensions_mm':dims,'observed_height_mm':observed_height,'top_normal_world':cn,'pixel_hint':cube['center']}
+
+
+def analyze(bgr,depth,props,camera_pose,attrs,require_ring=True,select='only'):
+    """Locate every white cube (top face) and, when visible, the black ring.
+
+    attrs supplies cube_size_mm and table_z_mm. `cubes` lists every measured cube; `cube` is
+    the one chosen by `select` (see select_cube). Every visible cube must be fully measurable,
+    since the others become collision obstacles. The ring is required for ring goals and is an
+    optional obstacle otherwise.
+    """
+    if bgr.shape[:2]!=depth.shape:raise ValueError('Color/depth sizes differ')
+    intr=intrinsics(props,depth.shape)
+    cloud=world_cloud(depth,intr,camera_pose)
+    valid=(depth>150)&(depth<1800)&np.isfinite(depth)
+    cubes,rings=find_objects(bgr)
+    result={'cube_count':len(cubes),'ring_count':len(rings),'issues':[],
+            'camera_pose_world':camera_pose,'camera_intrinsics':intr,'nominal_cube_size_mm':attrs.get('cube_size_mm',200)}
+    if not cubes:result['issues'].append('No cube in view')
+    if len(rings)>1 or (require_ring and len(rings)!=1):result['issues'].append('Need exactly one full ring in view')
+    if result['issues']:return native(result)
+    h,w=depth.shape;ring=rings[0] if rings else None
+    for label,obj in [*(('cube',c) for c in cubes),('ring',ring)]:
+        if obj is None:continue
+        x,y,bw,bh=obj['bbox']
+        if min(x,y)<8 or x+bw>w-8 or y+bh>h-8:
+            result['issues'].append(label+' is clipped by image edge')
+    if result['issues']:return native(result)
+    objects=np.zeros(depth.shape,np.uint8)
+    for c in cubes:cv2.fillConvexPoly(objects,np.asarray(c['box'],np.int32),1)
+    ring_outer=np.zeros(depth.shape,np.uint8)
+    if ring is not None:cv2.ellipse(ring_outer,ring['ellipse'],1,-1)
+    hsv=cv2.cvtColor(bgr,cv2.COLOR_BGR2HSV)
+    # Table samples: white low-saturation pixels outside all object detections.
+    excluded=cv2.dilate(objects|ring_outer,np.ones((35,35),np.uint8))
+    table_mask=valid&(excluded==0)&(hsv[:,:,1]<55)&(hsv[:,:,2]>100)
+    tn,td,table_points=fit_horizontal_plane(cloud[table_mask])
+    table_z=float(np.median(table_points[:,2]));result['observed_table_z_mm']=table_z
+    expected=attrs.get('table_z_mm',-23)
+    result['table_reference_error_mm']=table_z-expected
+    if abs(table_z-expected)>15:result['issues'].append('Depth/world tabletop differs from configured table by more than 15 mm; camera calibration needs verification')
+    nominal=float(attrs.get('cube_size_mm',200))
+    measured=[]
+    for c in cubes:
+        try:measured.append(_measure_cube(c,bgr,valid,cloud,hsv,table_z,intr,camera_pose,nominal))
+        except ValueError as e:
+            result['issues'].append(str(e));return native(result)
+    result['cubes']=measured
+    try:result['cube']=select_cube(measured,select)
     except ValueError as e:
         result['issues'].append(str(e));return native(result)
-    observed_height=float(center[2]-table_z)
-    if not all(nominal*.75<d<nominal*1.2 for d in dims):result['issues'].append('Detected cube top dimensions do not match nominal ore size')
-    if abs(observed_height-nominal)>20:result['issues'].append('Cube height does not match nominal ore size')
-    result['cube']={'top_center_world_mm':center,'world_yaw_deg':yaw,'top_dimensions_mm':dims,'observed_height_mm':observed_height,'top_normal_world':cn,'pixel_hint':cube['center']}
     if ring is None:return native(result)
     # Ring: sample its dark annulus, never the tabletop visible through its hole.
     inner=np.zeros(depth.shape,np.uint8)

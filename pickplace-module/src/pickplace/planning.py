@@ -58,6 +58,7 @@ def scene_world(settings, observation, targets, cube_state, goal):
         h, d = float(ring['height_mm']), float(ring['bounding_diameter_mm'])
         obstacles.append(prism(RING, [*xy, top-h/2], [d, d, h]))
     obstacles.extend(box_obstacles(s))
+    obstacles.extend(other_cubes(s, observation))
     if cube_state == 'carried':
         # Tool Z points down into the cube. The cup sits press_depth_mm inside the top
         # face, so the cube spans [-press, size] along tool Z (conservative both ways).
@@ -73,6 +74,21 @@ def scene_world(settings, observation, targets, cube_state, goal):
         observer = PoseInFrame(reference_frame='world', pose=Pose(o_z=1))
     return WorldState(obstacles=[GeometriesInFrame(reference_frame='world', geometries=obstacles)],
                       transforms=[Transform(reference_frame=CUBE, pose_in_observer_frame=observer, physical_object=cube)])
+
+
+def other_cubes(settings, observation):
+    """Every visible cube except the selected one, resting on the calibrated tabletop."""
+    from .calibration import calibrated_xy
+    size, chosen = settings.cube_size_mm, observation.get('cube', {}).get('top_center_world_mm')
+    result = []
+    for i, c in enumerate(observation.get('cubes', [])):
+        if chosen is not None and np.linalg.norm(np.subtract(c['top_center_world_mm'][:2], chosen[:2])) < 50:
+            continue
+        xy = calibrated_xy(settings.calibration, c['top_center_world_mm'])
+        yaw = c['world_yaw_deg']+settings.calibration['yaw_correction_deg']
+        top = settings.calibration['pickup_tcp_z_mm']
+        result.append(prism(f'other-cube-{i}', [*xy, top-size/2], [size+10, size+10, size], yaw))
+    return result
 
 
 def box_obstacles(settings):
