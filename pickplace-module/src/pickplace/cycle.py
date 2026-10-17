@@ -513,7 +513,9 @@ class PickPlaceCycle:
         the table (in the box or up on the ring it fails the table-height check or sits in the box).
         Returns the source to pick from (None = the cube vision found on the table)."""
         try:
-            await self.detect(goal, select)
+            # Known to be in a box or on the ring: one look from the overview only (no sweep), then
+            # straight to the remembered spot. Unknown / on the table: overview, then sweep.
+            await self.detect(goal, select, allow_sweep=remembered is None)
         except (CycleError, ValueError) as e:  # any vision failure = not seen on the table
             if remembered is None:
                 raise

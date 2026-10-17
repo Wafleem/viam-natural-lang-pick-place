@@ -313,12 +313,19 @@ class Planner:
                                      chain(['transfer'], qp), chain(['place', 'retract'], qq), chain(['return'], qq))
         paths = dict(item for part in parts for item in part)
 
-        def meets(a, b):
-            return max(abs(x-y) for x, y in zip(a, b)) <= .1
-        if not meets(paths['lift'][-1], paths['transfer'][0]):
-            paths['transfer'] = await self._plan_stage('transfer', paths['lift'][-1], observation, targets, goal)
-        if not meets(paths['retract'][-1], paths['return'][0]):
-            paths['return'] = await self._plan_stage('return', paths['retract'][-1], observation, targets, goal)
+        def gap(a, b):
+            return max(abs(x-y) for x, y in zip(a, b))
+        # A straight segment can end a hair off the IK joint goal the next chain started from. A gap of
+        # a few degrees is bridged by a direct joint step (the arm barely moves); only a real mismatch
+        # (another IK branch) is re-planned, which used to cost a full extra planning call.
+        for first, second in (('lift', 'transfer'), ('retract', 'return')):
+            g = gap(paths[first][-1], paths[second][0])
+            if g <= .1:
+                continue
+            if g <= 3.0:
+                paths[second] = [paths[first][-1]]+paths[second]
+            else:
+                paths[second] = await self._plan_stage(second, paths[first][-1], observation, targets, goal)
         return [(name, paths[name], speeds[speed]) for name, _, speed, _, _ in STAGES]
 
     async def plan_reset(self, start_deg, observation=None):
