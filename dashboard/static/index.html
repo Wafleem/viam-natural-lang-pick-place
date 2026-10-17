@@ -76,7 +76,8 @@
   th { color:var(--muted); font-weight:500; font-size:12px; }
   .bar { height:6px; border-radius:3px; background:var(--line); overflow:hidden; min-width:70px; }
   .bar i { display:block; height:100%; background:var(--ok); } .bar i.warn { background:var(--warn); } .bar i.bad { background:var(--bad); }
-  img.cam { width:100%; border-radius:10px; background:var(--code); min-height:160px; border:1px solid var(--line); }
+  img.cam { display:block; width:100%; max-height:calc(100vh - 270px); object-fit:contain;  /* whole frame fits on screen */
+    border-radius:10px; background:var(--code); min-height:160px; border:1px solid var(--line); }
   .kv { display:grid; grid-template-columns:auto minmax(0,1fr); gap:3px 12px; font-size:13px; }
   .kv span:nth-child(odd) { color:var(--muted); white-space:nowrap; } .kv span:nth-child(even) { overflow-wrap:anywhere; }
   .pill-ok { color:var(--ok); } .pill-bad { color:var(--bad); } .pill-warn { color:var(--warn); }
