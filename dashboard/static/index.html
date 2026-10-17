@@ -66,6 +66,13 @@
   #toast { position:fixed; right:16px; bottom:16px; max-width:min(560px,90vw); background:var(--panel2); border:1px solid var(--uv);
     border-radius:12px; padding:10px 14px; box-shadow:0 6px 30px var(--glow); display:none; font-size:13px; z-index:9;
     white-space:pre-wrap; word-break:break-word; }
+  .flows { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:10px; }
+  .flow { font-size:16px; font-weight:700; padding:18px 14px; border-radius:14px; border:2px solid var(--uv);
+    background:linear-gradient(135deg, var(--violet), #3b0a63); color:#fff; letter-spacing:.02em; }
+  .flow small { display:block; font-weight:400; font-size:12px; opacity:.8; margin-top:4px; }
+  .flow.safe { background:var(--panel2); color:var(--ink); border-color:var(--line); }
+  .steps { list-style:none; padding:0; margin:8px 0 0; font:12px ui-monospace,Menlo,monospace; }
+  .steps li { padding:3px 0; } .steps .run { color:var(--uv2); } .steps .ok { color:var(--ok); } .steps .bad { color:var(--bad); }
   @media (max-width:600px) { header { padding:10px 12px; } main, nav { padding-left:12px; padding-right:12px; } }
 </style>
 </head>
@@ -84,6 +91,21 @@
 <main>
 <!-- RUN -->
 <div class="tab" data-tab="Run">
+  <section class="wide">
+    <h2>Full flows · big buttons</h2>
+    <div class="flows">
+      <button class="flow safe" onclick="flow('check')">PRE-FLIGHT<small>self_test + live plan check · no motion</small></button>
+      <button class="flow" onclick="flow('recover')">RECOVER &amp; HOME<small>clear error → recover limits → overview</small></button>
+      <button class="flow" onclick="flow('box')">CUBE → BOX<small>overview → dry run → pick &amp; place</small></button>
+      <button class="flow" onclick="flow('ring')">CUBE → RING<small>overview → dry run → pick &amp; place</small></button>
+      <button class="flow" onclick="flow('home')">CUBE → HOME<small>reset_cube from box / ring</small></button>
+      <button class="flow" onclick="flow('tour')">FULL TOUR<small>box → home → ring → home</small></button>
+    </div>
+    <div class="row"><button onclick="abortFlow()">abort flow</button><span class="muted" id="flowstate">idle · ⚠ flows move the arm: tick workcell clear first</span>
+      <span class="muted">cube is at <b id="cubeat">?</b></span>
+      <select id="setloc"><option value="">set cube location…</option><option>unknown</option><option>table</option><option>home</option><option>ring</option><option>box</option></select></div>
+    <ol class="steps" id="flowsteps"></ol>
+  </section>
   <section>
     <h2>Pick &amp; place</h2>
     <div class="row">cube <select id="select"><option>only</option><option>left</option><option>right</option><option>nearest</option><option>farthest</option></select>
@@ -367,6 +389,58 @@ async function loadDescribe() {
     $('pc-goal').innerHTML = d.place.goals.map(g => `<option>${esc(g.name)}</option>`).join('');
   } catch (e) {}
 }
+// ---- full flows: each step waits for code-2 to finish; any failure stops the flow
+let flowAbort = false;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+async function waitIdle(label) {
+  for (let i = 0; i < 900; i++) { if (flowAbort) throw new Error('aborted');
+    const s = await api('/api/command', {action:'status'}); if (!s.busy) { if (s.state === 'failed' || s.state === 'stopped') throw new Error(s.error || s.state); return s; }
+    await sleep(1000); }
+  throw new Error(label + ' timed out');
+}
+function stepLine(text, cls) { const li = document.createElement('li'); li.textContent = text; li.className = cls || 'run'; $('flowsteps').appendChild(li); return li; }
+async function step(label, fn) { const li = stepLine('… ' + label); try { const r = await fn(); li.textContent = '✓ ' + label; li.className = 'ok'; return r; }
+  catch (e) { li.textContent = '✗ ' + label + ' — ' + e.message; li.className = 'bad'; throw e; } }
+const go = (action, extra) => async () => { const r = await api('/api/command', {action, ...extra, workcell_ready:true, request_id:'flow-' + Date.now() + '-' + action});
+  if (r.accepted === false) throw new Error(r.already_running ? 'code-2 busy' : 'duplicate'); return waitIdle(action); };
+const still = (action, extra) => async () => { await api('/api/command', {action, ...extra}); return waitIdle(action); };
+async function placeCube(goal) {
+  await step('reset → overview', go('reset'));
+  const loc = (await api('/api/command', {action:'status'})).cube_location || {};
+  if (['ring', 'box'].includes(loc.place) && loc.place !== goal) {
+    await step(`pick_place ${loc.place} → ${goal} (remembered grip)`, go('pick_place', {place:{goal}}));
+  } else {
+    await step(`dry_run → ${goal}`, still('dry_run', {pick:{object:'cube', select:'only'}, place:{goal}}));
+    await step(`pick_place → ${goal}`, go('pick_place', {pick:{object:'cube', select:'only'}, place:{goal}}));
+  }
+  const s = await api('/api/command', {action:'status'}), o = (s.last_result || {}).outcome;
+  if (o) stepLine('vision: ' + o.detail, o.cube_left_pick_spot === false || o.cube_at_goal === false ? 'bad' : 'ok');
+}
+async function flow(name) {
+  if (name !== 'check' && needClear()) return;
+  flowAbort = false; $('flowsteps').innerHTML = ''; $('flowstate').textContent = 'running ' + name;
+  try {
+    if (name === 'check') {
+      await step('self_test', still('self_test'));
+      const st = (await api('/api/command', {action:'status'})).last_result || {}; stepLine('self_test ok: ' + st.ok, st.ok ? 'ok' : 'bad');
+      for (const goal of ['box', 'ring']) await step(`live plan check → ${goal}`, async () => { const r = await api('/api/plan_check', {goal, frame:0}); if (!r.ok) throw new Error(r.error); return r; });
+    } else if (name === 'recover') {
+      await step('clear controller error', () => api('/api/arm/do', {command:'clear_error'}));
+      await step('recover_limits', go('recover_limits'));
+      await step('reset → overview', go('reset'));
+      await step('self_test', still('self_test'));
+    } else if (name === 'home') {
+      await step('reset_cube → home', go('reset_cube'));
+      const o = ((await api('/api/command', {action:'status'})).last_result || {}).outcome; if (o) stepLine('vision: ' + o.detail, o.cube_at_goal === false ? 'bad' : 'ok');
+    } else if (name === 'tour') {
+      for (const g of ['box', 'home', 'ring', 'home']) { if (g === 'home') await step('reset_cube → home', go('reset_cube')); else await placeCube(g); }
+    } else await placeCube(name);
+    $('flowstate').textContent = name + ' finished';
+  } catch (e) { $('flowstate').textContent = name + ' stopped: ' + e.message; toast(e.message, true); }
+}
+async function abortFlow() { flowAbort = true; await stopAll(); }
+$('setloc').onchange = async () => { const place = val('setloc'); if (!place) return;
+  try { await api('/api/command', {action:'set_cube_location', place}); toast('cube location set to ' + place); } catch (e) { toast(e.message, true); } $('setloc').value = ''; };
 // ---- live state
 function chip(id, text, cls) { $(id).textContent = text; $(id).className = 'chip ' + (cls || ''); }
 async function poll() {
@@ -390,6 +464,7 @@ async function poll() {
       `<span>error</span><span class="${c.error ? 'pill-bad' : ''}">${esc(c.error || 'none')}</span>` +
       (o ? `<span>vision check</span><span class="${o.cube_left_pick_spot ? 'pill-ok' : 'pill-warn'}">${esc(o.detail)}</span>` : '');
     $('lastresult').textContent = pretty(c.last_result || {});
+    $('cubeat').textContent = (c.cube_location || {}).place || '?';
     if (c.last_result && c.last_result.candidate) $('candidate').textContent = pretty(c.last_result.candidate);
   } catch (e) { chip('c-state', 'offline: ' + e.message, 'bad'); }
 }

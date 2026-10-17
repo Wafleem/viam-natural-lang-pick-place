@@ -10,6 +10,8 @@ GenericService.do_command; {"action":"describe"} returns this list machine-reada
   {"action": "run", "goal": "ring"|<box name>, "workcell_ready": true}   one full cycle (MOVES)
   {"action": "box_once", "workcell_ready": true}               alias: run goal=<first configured box>
   {"action": "ring_once", "workcell_ready": true}              alias: run goal=ring
+  {"action": "reset_cube", "workcell_ready": true}             cube back to its home spot (MOVES)
+  {"action": "set_cube_location", "place": "box"}              tell code-2 where the cube is (no motion)
   {"action": "reset", "workcell_ready": true}                  suction off, go to overview (MOVES)
   {"action": "recover_limits", "workcell_ready": true}         back off a joint stuck at its limit (MOVES)
   {"action": "measure_box", "name": "box2"}                    no motion (at overview): candidate box entry
@@ -44,7 +46,7 @@ IMPLEMENTATION = 'pickplace-v1-open-loop-suction-press'
 LOGGER = getLogger(__name__)
 API_VERSION = 1
 CYCLE_ACTIONS = {'pick_place', 'run', 'box_once', 'ring_once', 'start'}  # start: pre-0.0.25 clients
-MOTION_ACTIONS = CYCLE_ACTIONS | {'reset', 'recover_limits'}
+MOTION_ACTIONS = CYCLE_ACTIONS | {'reset', 'recover_limits', 'reset_cube'}
 STILL_ACTIONS = {'dry_run', 'measure_box', 'self_test'}  # background tasks that never move the arm
 
 
@@ -85,9 +87,10 @@ class PickPlaceService(Generic, EasyResource):
             'implementation': IMPLEMENTATION, 'state': self.state, 'stage': c.stage, 'busy': self.busy(),
             'error': self.error, 'request_id': self.request_id, 'default_goal': s.default_goal,
             'goals': s.goals, 'action': getattr(self, 'action', ''),
+            'cube_location': copy.deepcopy(c.memory.location), 'home': copy.deepcopy(s.home),
             # Fields the code-3 web app (code3-web) checks before allowing a send.
             'available_goals': s.goals, 'calibrated': bool(s.calibration),
-            'goal_details': [{'name': 'ring', 'type': 'ring'}]+[
+            'goal_details': ([{'name': 'home', 'type': 'table'}] if s.home else [])+[{'name': 'ring', 'type': 'ring'}]+[
                 {'name': n, 'type': 'box', 'color': b.get('color')} for n, b in s.boxes.items()],
             'suction': {'mode': 'open_loop', 'holding_feedback_used': False, 'press_depth_mm': s.press_depth_mm,
                         'suction_dwell_s': s.suction_dwell_s, 'release_dwell_s': s.release_dwell_s},
@@ -109,6 +112,8 @@ class PickPlaceService(Generic, EasyResource):
                 self.last_result = {'at_overview': True}
             elif action == 'recover_limits':
                 self.last_result = await self.cycle.recover_limits()
+            elif action == 'reset_cube':
+                self.last_result = await self.cycle.reset_cube()
             elif action == 'dry_run':
                 self.last_result = await self.cycle.dry_run(goal, select)
             elif action == 'measure_box':
@@ -129,7 +134,7 @@ class PickPlaceService(Generic, EasyResource):
         return {
             'api_version': API_VERSION, 'implementation': IMPLEMENTATION,
             'pick': {'objects': ['cube'], 'select': list(CUBE_SELECTORS)+['{"index": n} (left to right)']},
-            'place': {'goals': [{'name': 'ring', 'type': 'ring'}]+[
+            'place': {'goals': ([{'name': 'home', 'type': 'table'}] if s.home else [])+[{'name': 'ring', 'type': 'ring'}]+[
                 {'name': n, 'type': 'box', 'color': b.get('color'), 'label': b.get('label', n)} for n, b in s.boxes.items()]},
             'default_goal': s.default_goal,
             'commands': {
@@ -140,6 +145,9 @@ class PickPlaceService(Generic, EasyResource):
                 'run': {'moves': True}, 'box_once': {'moves': True}, 'ring_once': {'moves': True},
                 'start': {'moves': True, 'note': 'legacy alias of run, kept for older clients'},
                 'reset': {'moves': True}, 'recover_limits': {'moves': True},
+                'reset_cube': {'moves': True, 'note': 'put the cube back on its home spot from wherever code-2 placed it'},
+                'set_cube_location': {'moves': False, 'example': {'action': 'set_cube_location', 'place': 'box'},
+                                      'note': 'tell code-2 where the cube is after moving it by hand (unknown, table, or a goal)'},
                 'self_test': {'moves': False}, 'measure_box': {'moves': False}, 'status': {'moves': False},
                 'describe': {'moves': False}, 'release': {'moves': False}, 'stop': {'moves': False},
             },
@@ -189,6 +197,11 @@ class PickPlaceService(Generic, EasyResource):
                 await asyncio.gather(self.task, return_exceptions=True)
             await self.cycle.stop_arm()
             return self.status()
+        if action == 'set_cube_location':
+            if self.busy():
+                raise RuntimeError('code-2 is busy; stop it first')
+            self.cycle.set_location(command.get('place'), self.settings.goals)
+            return self.status()
         if action == 'release':
             if self.busy():
                 raise RuntimeError('code-2 is busy; stop it first')
@@ -196,7 +209,7 @@ class PickPlaceService(Generic, EasyResource):
             return self.status()
         if action not in MOTION_ACTIONS | STILL_ACTIONS:
             raise ValueError('Unknown action. Use describe, status, self_test, dry_run, measure_box, pick_place, run, '
-                             'box_once, ring_once, reset, recover_limits, release, stop')
+                             'box_once, ring_once, reset_cube, set_cube_location, reset, recover_limits, release, stop')
         if self.busy():
             return {**self.status(), 'accepted': False, 'already_running': True}
         if action in MOTION_ACTIONS and command.get('workcell_ready') is not True:

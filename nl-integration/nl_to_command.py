@@ -23,7 +23,7 @@ SELECT_WORDS = {
 ORDINALS = {'first': 0, '1st': 0, 'second': 1, '2nd': 1, 'third': 2, '3rd': 2}
 RING_WORDS = ('ring', 'hoop', 'donut', 'circle')
 CHECK_WORDS = ('can you', 'could you', 'is it possible', 'check', 'dry run', 'simulate', 'plan', 'without moving')
-MOVES = {'pick_place', 'reset'}
+MOVES = {'pick_place', 'reset', 'reset_cube'}
 
 
 def _words(text):
@@ -35,8 +35,10 @@ def parse(text, describe=DESCRIBE):
     low, words = text.lower(), _words(text)
     if any(w in words for w in ('stop', 'halt', 'freeze', 'abort')):
         return {'command': {'action': 'stop'}, 'moves': False, 'explanation': 'Stop the arm now'}
+    if 'cube' in words and any(p in low for p in ('reset', 'put it back', 'back home', 'put the cube back', 'cube back', 'return the cube')):
+        return {'command': {'action': 'reset_cube'}, 'moves': True, 'explanation': 'Put the cube back on its home spot'}
     if any(p in low for p in ('go home', 'reset', 'home position', 'overview')):
-        return {'command': {'action': 'reset'}, 'moves': True, 'explanation': 'Return to the overview pose'}
+        return {'command': {'action': 'reset'}, 'moves': True, 'explanation': 'Return the arm to the overview pose'}
     if any(p in low for p in ('status', "what are you doing", 'what is the arm doing')):
         return {'command': {'action': 'status'}, 'moves': False, 'explanation': 'Report status'}
     if any(w in words for w in ('release', 'drop', 'let')) and 'go' in words or 'suction off' in low:
@@ -54,6 +56,8 @@ def parse(text, describe=DESCRIBE):
     for g in goals:  # specific box names first ("box2", "blue_box"); plain "box" is not a name
         if g['type'] == 'box' and g['name'].lower() not in generic and g['name'].lower() in words:
             place = {'goal': g['name']}
+    if place is None and any(w in words for w in ('table', 'home')):
+        place = {'type': 'home'}
     if place is None and any(w in words for w in RING_WORDS):
         place = {'type': 'ring'}
     if place is None:
@@ -76,7 +80,7 @@ def parse(text, describe=DESCRIBE):
 def validate(command, describe=DESCRIBE):
     """Reject anything outside the advertised API before it reaches the robot."""
     action = command.get('action')
-    if action not in ('pick_place', 'dry_run', 'reset', 'status', 'stop', 'release', 'describe', 'self_test'):
+    if action not in ('pick_place', 'dry_run', 'reset', 'reset_cube', 'status', 'stop', 'release', 'describe', 'self_test'):
         raise ValueError('Unsupported action '+str(action))
     if action in ('pick_place', 'dry_run'):
         select = command['pick']['select']
@@ -85,7 +89,7 @@ def validate(command, describe=DESCRIBE):
         place = command['place']
         names = {g['name'] for g in describe['place']['goals']}
         colours = {g.get('color') for g in describe['place']['goals']}
-        if not (place.get('goal') in names or place.get('type') in ('ring', 'box') or place.get('color') in colours):
+        if not (place.get('goal') in names or place.get('type') in ('ring', 'box', 'home') or place.get('color') in colours):
             raise ValueError('Unknown place target '+str(place))
     return command
 

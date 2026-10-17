@@ -196,7 +196,7 @@ def _measure_cube(cube,bgr,valid,cloud,hsv,table_z,intr,camera_pose,nominal):
     return {'top_center_world_mm':center,'world_yaw_deg':yaw,'top_dimensions_mm':dims,'observed_height_mm':observed_height,'top_normal_world':cn,'pixel_hint':cube['center']}
 
 
-def analyze(bgr,depth,props,camera_pose,attrs,require_ring=True,select='only'):
+def analyze(bgr,depth,props,camera_pose,attrs,require_ring=True,select='only',require_cube=True):
     """Locate every white cube (top face) and, when visible, the black ring.
 
     attrs supplies cube_size_mm and table_z_mm. `cubes` lists every measured cube; `cube` is
@@ -211,7 +211,7 @@ def analyze(bgr,depth,props,camera_pose,attrs,require_ring=True,select='only'):
     cubes,rings=find_objects(bgr)
     result={'cube_count':len(cubes),'ring_count':len(rings),'issues':[],
             'camera_pose_world':camera_pose,'camera_intrinsics':intr,'nominal_cube_size_mm':attrs.get('cube_size_mm',200)}
-    if not cubes:result['issues'].append('No cube in view')
+    if not cubes and require_cube:result['issues'].append('No cube in view')
     if len(rings)>1 or (require_ring and len(rings)!=1):result['issues'].append('Need exactly one full ring in view')
     if result['issues']:return native(result)
     h,w=depth.shape;ring=rings[0] if rings else None
@@ -241,9 +241,10 @@ def analyze(bgr,depth,props,camera_pose,attrs,require_ring=True,select='only'):
         except ValueError as e:
             result['issues'].append(str(e));return native(result)
     result['cubes']=measured
-    try:result['cube']=select_cube(measured,select)
-    except ValueError as e:
-        result['issues'].append(str(e));return native(result)
+    if measured or require_cube:
+        try:result['cube']=select_cube(measured,select)
+        except ValueError as e:
+            result['issues'].append(str(e));return native(result)
     if ring is None:return native(result)
     # Ring: sample its dark annulus, never the tabletop visible through its hole.
     inner=np.zeros(depth.shape,np.uint8)

@@ -192,7 +192,7 @@ def test_service_command_guards(settings, kin, urdf, attrs):
     with pytest.raises(ValueError, match='goal must be one of'):
         asyncio.run(svc.do_command({'action': 'run', 'goal': 'shelf', 'workcell_ready': True}))
     status = asyncio.run(svc.do_command({'action': 'status'}))
-    assert status['goals'] == ['ring', 'box']
+    assert status['goals'] == ['home', 'ring', 'box']
     assert status['suction'] == {'mode': 'open_loop', 'holding_feedback_used': False, 'press_depth_mm': 10.0,
                                  'suction_dwell_s': 1.0, 'release_dwell_s': 1.0}
     json.dumps(status)

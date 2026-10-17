@@ -42,13 +42,17 @@ def scene_world(settings, observation, targets, cube_state, goal):
     """WorldState with the cube (static or carried), ring, local table patch and every box."""
     s, size = settings, settings.cube_size_mm
     cube_top, goal_top = np.array(targets['cube_top_world_mm']), np.array(targets['goal_top_world_mm'])
-    # No padding into a box (the measured opening is tight); 10 mm around the cube otherwise.
-    pad = 0.0 if goal in s.boxes else 10.0
+    source = targets.get('source_place', 'table')
+    # No padding while the cube is in, or passes through, a box opening (it is tight);
+    # 10 mm around the cube otherwise.
+    in_box = {'at_pick': source in s.boxes, 'placed': goal in s.boxes,
+              'carried': source in s.boxes or goal in s.boxes}[cube_state]
+    pad = 0.0 if in_box else 10.0
     obstacles = []
-    # Support patch whose top is the cube's bottom at pickup (taught contact - cube size).
+    # Tabletop patch around both ends; its top is the table (taught contact - cube size).
     low = np.minimum(cube_top[:2], goal_top[:2])-size*.7
     high = np.maximum(cube_top[:2], goal_top[:2])+size*.7
-    table_top = cube_top[2]-size
+    table_top = s.calibration['pickup_tcp_z_mm']-size
     obstacles.append(prism(TABLE, [*(low+high)/2, table_top-100], [*(high-low), 200]))
     ring = observation.get('ring')
     if ring:
@@ -56,7 +60,7 @@ def scene_world(settings, observation, targets, cube_state, goal):
         xy = calibrated_xy(s.calibration, ring['top_center_world_mm'])
         top = s.calibration['place_tcp_z_mm']-size
         h, d = float(ring['height_mm']), float(ring['bounding_diameter_mm'])
-        obstacles.append(prism(RING, [*xy, top-h/2], [d, d, h]))
+        obstacles.extend(ring_prisms(xy, top-h/2, d, h))
     obstacles.extend(box_obstacles(s))
     obstacles.extend(other_cubes(s, observation))
     if cube_state == 'carried':
@@ -74,6 +78,16 @@ def scene_world(settings, observation, targets, cube_state, goal):
         observer = PoseInFrame(reference_frame='world', pose=Pose(o_z=1))
     return WorldState(obstacles=[GeometriesInFrame(reference_frame='world', geometries=obstacles)],
                       transforms=[Transform(reference_frame=CUBE, pose_in_observer_frame=observer, physical_object=cube)])
+
+
+# The ring is round. Four bars (length d, width d*sin 22.5 deg) at 0/45/90/135 deg cover the
+# disc and stick out at most 7% beyond it; one d x d square adds 41% at its corners.
+RING_BARS = [(RING if a == 0 else f'{RING}-{a}', a) for a in (0, 45, 90, 135)]
+
+
+def ring_prisms(xy, z, d, h):
+    w = d*np.sin(np.radians(22.5))
+    return [prism(label, [*xy, z], [d, w, h], a) for label, a in RING_BARS]
 
 
 def other_cubes(settings, observation):
@@ -96,12 +110,21 @@ def box_obstacles(settings):
             for label, xyz, dims, yaw in cavity_geometry(box, name)]
 
 
-def allowed_contacts(settings, contacts, goal):
+def supports(settings, place):
+    """Frames the cube rests on at a place (allowed cube contacts there)."""
+    if place in settings.boxes:
+        return [floor_label(place)]
+    if place == 'ring':
+        return [label for label, *_ in RING_BARS]
+    return ['table', TABLE]  # home or anywhere on the table
+
+
+def allowed_contacts(settings, contacts, goal, source='table'):
     pairs = [(settings.gripper, CUBE)]
     if contacts == 'pickup':
-        pairs += [(CUBE, 'table'), (CUBE, TABLE)]
+        pairs += [(CUBE, f) for f in supports(settings, source)]
     elif contacts == 'place':
-        pairs += [(CUBE, floor_label(goal) if goal in settings.boxes else RING)]
+        pairs += [(CUBE, f) for f in supports(settings, goal)]
     return pairs
 
 
@@ -184,7 +207,7 @@ class Planner:
             try:
                 path = await self.segment(start, world, goal_deg=value if what == 'joint' else None,
                                           pose=value if what == 'pose' else None, straight=kind == 'straight',
-                                          allow=allowed_contacts(s, contacts, goal))
+                                          allow=allowed_contacts(s, contacts, goal, targets.get('source_place', 'table')))
             except Exception as e:
                 hint = ''
                 if 'violation between' in str(e):

@@ -79,3 +79,19 @@ def test_pickup_orientation_uses_least_wrist_travel(settings, observation, kin):
         except ValueError:
             continue
         assert travel <= sum(abs(a-b) for a, b in zip(q, settings.overview_joints_deg))+1e-6
+
+
+def test_ring_bars_cover_the_disc_tightly():
+    from pickplace.planning import ring_prisms
+    d = 230.0
+    bars = ring_prisms([0, 0], 0, d, 20)
+    def inside(p, g):
+        a = math.radians(g.center.theta)
+        u = np.array([math.cos(a), math.sin(a)]) @ p, np.array([-math.sin(a), math.cos(a)]) @ p
+        return abs(u[0]) <= g.box.dims_mm.x/2+1e-9 and abs(u[1]) <= g.box.dims_mm.y/2+1e-9
+    rng = np.random.default_rng(1)
+    for _ in range(2000):  # every point of the disc is covered
+        r, t = d/2*math.sqrt(rng.random()), rng.random()*2*math.pi
+        assert any(inside(np.array([r*math.cos(t), r*math.sin(t)]), g) for g in bars)
+    far = max(math.hypot(g.box.dims_mm.x/2, g.box.dims_mm.y/2) for g in bars)
+    assert far <= 1.08*d/2  # at most ~7% beyond the ring

@@ -95,7 +95,15 @@ async def main(args):
         if args.ring_world_xy:
             move_ring(observation, s.calibration, args.ring_world_xy)
         start = current if args.start_current else s.overview_joints_deg
-        plans = await cycle.plan(args.goal, observation, start)
+        source = None
+        if args.from_box:
+            # The cube exactly as a cycle into that box would leave it (same grip), then plan from there.
+            from pickplace.task import compute_targets
+            placed = compute_targets(s, observation, args.from_box, kin, start)
+            source = {'place': args.from_box, 'top_world_mm': placed['goal_top_world_mm'], 'yaw_deg': placed['place_yaw_deg'],
+                      'tcp_in_cube': placed['grasp']['tcp_in_cube']}
+            observation = {k: v for k, v in observation.items() if k not in ('cube', 'cubes')}
+        plans = await cycle.plan(args.goal, observation, start, source)
         report = {'goal': args.goal, 'start': start, 'summary': cycle.plan_summary,
                   'q_above_pick': cycle.targets['q_above_pick'], 'q_above_place': cycle.targets['q_above_place'],
                   'max_abs_j4_deg': max(abs(q[3]) for _, path, _ in plans for q in path)}
@@ -118,5 +126,6 @@ if __name__ == '__main__':
     p.add_argument('--live-detect', action='store_true', help='detect live (arm must be at the overview)')
     p.add_argument('--start-current', action='store_true', help='plan from the live joints instead of the overview')
     p.add_argument('--ring-world-xy', type=float, nargs=2, metavar=('X', 'Y'), help='what-if ring position (tool XY, mm)')
+    p.add_argument('--from-box', metavar='BOX', help='plan picking the cube out of this box (as reset_cube does)')
     p.add_argument('--out', help='write the full plan JSON here')
     asyncio.run(main(p.parse_args()))

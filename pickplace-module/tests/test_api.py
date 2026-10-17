@@ -62,8 +62,8 @@ def test_describe_is_json_and_lists_goals(attrs, kin, urdf):
     svc = make_service(two_box_settings(attrs), kin, urdf)
     d = asyncio.run(svc.do_command({'action': 'describe'}))
     json.dumps(d)
-    assert [g['name'] for g in d['place']['goals']] == ['ring', 'box', 'blue_box']
-    assert d['place']['goals'][2]['color'] == 'blue' and 'left' in d['pick']['select']
+    assert [g['name'] for g in d['place']['goals']] == ['home', 'ring', 'box', 'blue_box']
+    assert d['place']['goals'][3]['color'] == 'blue' and 'left' in d['pick']['select']
 
 
 def test_pick_place_arguments(attrs, kin, urdf):
