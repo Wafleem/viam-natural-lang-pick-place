@@ -36,6 +36,7 @@ class Settings:
     overview_joints_deg: list
     boxes: dict  # name -> accepted box reference; every box is also a collision obstacle
     home: dict | None = None  # {"xy_mm": [x, y], "yaw_deg": a}: the cube's table spot, goal "home"
+    ring_spot: dict | None = None  # {"xy_mm", "diameter_mm", "height_mm"}: fixed ring; else vision finds it
     default_goal: str = 'ring'
     cube_size_mm: float = 200.0
     table_z_mm: float = -23.0
@@ -74,6 +75,7 @@ class Settings:
             raise ValueError('Enable cam align_color_depth and set aligned_depth_enabled=true')
         boxes = _boxes(attrs)
         home = _home(attrs.get('home'))
+        ring_spot = _ring(attrs.get('ring'))
         if home is not None and 'home' in boxes:
             raise ValueError('"home" is the table spot; give the box another name')
         goal = attrs.get('default_goal', 'ring')
@@ -84,7 +86,7 @@ class Settings:
             raise ValueError('placement_correction_world_xy_mm needs two values with magnitude <= 25 mm')
         mount = attrs.get('camera_mount_reference')
         s = cls(
-            calibration=cal, overview_joints_deg=overview, boxes=boxes, home=home, default_goal=goal,
+            calibration=cal, overview_joints_deg=overview, boxes=boxes, home=home, ring_spot=ring_spot, default_goal=goal,
             cube_size_mm=_number(attrs, 'cube_size_mm', 200, 20, 400),
             table_z_mm=_number(attrs, 'table_z_mm', -23, -500, 500),
             press_depth_mm=_number(attrs, 'press_depth_mm', 10, 0, 20),
@@ -156,6 +158,19 @@ def _home(raw):
     if isinstance(yaw, bool) or not isinstance(yaw, (int, float)) or not math.isfinite(yaw):
         raise ValueError('home.yaw_deg must be a finite number')
     return {'xy_mm': [float(v) for v in xy], 'yaw_deg': float(yaw)}
+
+
+def _ring(raw):
+    if raw is None:
+        return None
+    home = _home({'xy_mm': raw.get('xy_mm') if isinstance(raw, dict) else None})
+    out = {'xy_mm': home['xy_mm']}
+    for key, default in (('diameter_mm', 230.0), ('height_mm', 28.0)):
+        v = raw.get(key, default)
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not 0 < v < 600:
+            raise ValueError(f'ring.{key} must be a positive number of mm')
+        out[key] = float(v)
+    return out
 
 
 BOX_KEYS = ('floor_center_world_mm', 'placement_center_xy_mm', 'inner_dimensions_mm', 'world_yaw_deg', 'rim_z_mm')

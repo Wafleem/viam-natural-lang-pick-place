@@ -136,3 +136,15 @@ def test_failure_after_contact_forgets_location(settings, kin, urdf, tmp_path):
     with pytest.raises(Exception):
         asyncio.run(cycle2.run('box'))
     assert cycle2.memory.location['place'] == 'table'
+
+
+def test_fixed_ring_spot_needs_no_vision(attrs, observation, kin):
+    from pickplace.config import Settings
+    s = Settings.from_attributes({**attrs, 'ring': {'xy_mm': [300, -470]}})
+    obs = {k: v for k, v in observation.items() if k != 'ring'}
+    t = compute_targets(s, obs, 'ring', kin, s.overview_joints_deg)
+    C = cube_frame_from_tool(t['release'], t['grasp']['tcp_in_cube'])
+    assert C[:2, 3] == pytest.approx([300, -470], abs=1e-6) and C[2, 3] == pytest.approx(s.calibration['place_tcp_z_mm'])
+    from pickplace.planning import scene_world
+    labels = {g.label for g in scene_world(s, obs, t, 'placed', 'ring').obstacles[0].geometries}
+    assert {'vision-ring', 'vision-ring-45', 'vision-ring-90', 'vision-ring-135'} <= labels

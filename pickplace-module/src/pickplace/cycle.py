@@ -192,7 +192,7 @@ class PickPlaceCycle:
         self.event('detecting', select=select)
         frames, last = [], ''
         for i in range(9):
-            obs = await self.capture(require_ring=goal == 'ring', select=select)
+            obs = await self.capture(require_ring=goal == 'ring' and not self.s.ring_spot, select=select)
             issues = [e for e in obs.get('issues', []) if not e.startswith('Depth/world tabletop differs')]
             if issues:
                 raise CycleError('; '.join(issues))
@@ -347,7 +347,7 @@ class PickPlaceCycle:
             else:
                 self.event('using_remembered_cube', place=remembered['place'])
                 self.observation = await self.look_for_obstacles()
-                if goal == 'ring' and 'ring' not in self.observation:
+                if goal == 'ring' and not self.s.ring_spot and 'ring' not in self.observation:
                     raise CycleError('Ring goal needs the ring in view from the overview')
             if remembered is not None and remembered['place'] == goal:
                 raise CycleError(f'The cube is already at {goal}')
@@ -405,7 +405,7 @@ class PickPlaceCycle:
             return self.memory.set(place, how='set by operator')
         # A box or the ring: assume it sits where code-2 would place it, gripped like a fresh pick.
         from .task import goal_surface
-        top, yaw, _ = goal_surface(self.s, self.observation or {}, place) if place != 'ring' else (None, None, None)
+        top, yaw, _ = goal_surface(self.s, self.observation or {}, place) if place != 'ring' or self.s.ring_spot else (None, None, None)
         if top is None:
             raise CycleError('Cannot locate the ring without vision; use pick_place to put the cube there')
         from .grasp_geometry import describe_grasp

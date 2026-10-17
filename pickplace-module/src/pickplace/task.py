@@ -48,6 +48,8 @@ def goal_surface(settings, observation, goal):
     if goal == 'home':
         # A table spot: the cube rests on the calibrated tabletop (taught contact height).
         return np.array([*s.home['xy_mm'], s.calibration['pickup_tcp_z_mm']]), s.home['yaw_deg'], None
+    if s.ring_spot:  # fixed ring: the cube centre goes exactly on the configured spot
+        return np.array([*s.ring_spot['xy_mm'], s.calibration['place_tcp_z_mm']]), s.placement_world_yaw_deg, None
     return ring_target(observation, s.calibration)+np.array([*s.placement_correction_world_xy_mm, 0.]), s.placement_world_yaw_deg, None
 
 
