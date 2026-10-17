@@ -83,7 +83,7 @@
   "pre_contact_mm": 20,
   "suction_dwell_s": 3.0,
   "release_dwell_s": 1.0,
-  "clearance_mm": 100,
+  "clearance_mm": 50,
   "travel_speed_deg_s": 75,
   "approach_speed_deg_s": 37.5,
   "press_speed_deg_s": 1,
