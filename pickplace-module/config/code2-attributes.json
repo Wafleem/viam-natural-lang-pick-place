@@ -81,32 +81,32 @@
   "placement_world_yaw_deg": 0,
   "press_depth_mm": 20,
   "pre_contact_mm": 20,
-  "suction_dwell_s": 2.5,
+  "suction_dwell_s": 3.0,
   "release_dwell_s": 1.0,
   "clearance_mm": 100,
   "travel_speed_deg_s": 20,
-  "approach_speed_deg_s": 6,
+  "approach_speed_deg_s": 10,
   "press_speed_deg_s": 1,
-  "acceleration_deg_s2": 6,
+  "acceleration_deg_s2": 25,
   "joint_limit_margin_deg": 5,
   "lease_service": "code-1",
   "boxes": [
     {
       "name": "box",
       "floor_center_world_mm": [
-        286.2,
-        -154.6,
-        0.8515
+        290.09,
+        -139.75,
+        0.85
       ],
       "placement_center_xy_mm": [
-        286.2,
-        -154.6
+        290.09,
+        -139.75
       ],
       "inner_dimensions_mm": [
         262.4,
         203.2
       ],
-      "world_yaw_deg": -5.67,
+      "world_yaw_deg": -1.21,
       "rim_z_mm": 130.0
     }
   ],
@@ -124,5 +124,8 @@
     ],
     "diameter_mm": 236,
     "height_mm": 25
-  }
+  },
+  "pick_retries": 3,
+  "sweep_speed_deg_s": 20,
+  "carry_clearance_mm": 25
 }

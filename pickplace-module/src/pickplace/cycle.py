@@ -4,11 +4,13 @@ Order: release suction -> return to the calibrated overview -> 5-frame RGB-D det
 -> plan every stage -> approach, descend, SUCTION ON, press press_depth_mm into the cube,
 dwell, lift, transfer, place, SUCTION OFF, dwell, retract, return.
 
-Suction is OPEN LOOP: the vacuum gripper's IsHoldingSomething feedback is not read
-anywhere (its driver reports inconsistently). Alignment comes from vision; collision
-avoidance and centring come from the motion planner.
+Suction is CLOSED LOOP since the driver update: the press waits for IsHoldingSomething to
+report a seal, the lift is checked with it, and a missed seal or a drop triggers a re-pick
+(pick_retries). Alignment comes from vision; collision avoidance and centring come from
+the motion planner.
 """
 import asyncio
+import math
 import copy
 import json
 import time
@@ -22,7 +24,7 @@ from viam.proto.component.arm import JointPositions, MoveOptions
 
 from .kinematics import ArmKinematics
 from .memory import CubeMemory
-from .planning import Planner
+from .planning import Planner, allowed_contacts, carried_cube_violations, scene_world
 from .task import compute_targets
 from .transforms import pose_matrix
 from .vision_geometry import analyze, consensus_observation, decode_depth, native
@@ -132,8 +134,11 @@ class PickPlaceCycle:
     # ---- suction (open loop) ---------------------------------------------
     async def suction_on(self):
         self.event('suction_on')
-        if await self.gripper.grab(timeout=5) is False:
-            raise CycleError('Vacuum gripper rejected the Grab command')
+        # Open loop: Grab's bool mirrors the unreliable holding sensor (false in the air), so it
+        # never gates the press. Only an exception means the command itself failed.
+        reply = await self.gripper.grab(timeout=5)
+        if reply is False:
+            self.event('grab_reported_not_holding', note='ignored: open-loop suction')
 
     async def suction_off(self, dwell=True):
         self.event('suction_off')
@@ -227,8 +232,8 @@ class PickPlaceCycle:
     async def sweep_for_cube(self, goal, select='only'):
         """Pan the camera (base joint) to nearby views until the cube is fully seen.
 
-        Positions from a sweep view are anchored on the ring: its overview position is known, so
-        (ring at overview) - (ring seen from this view) corrects everything seen from this view.
+        A sweep view is the overview camera translated sideways (same orientation and height),
+        so the overview calibration applies in camera terms: tool = cal(raw - shift) + shift.
         The arm returns to the overview before planning; the observation is expressed as if seen
         from there, so the rest of the cycle is unchanged.
         """
@@ -237,12 +242,6 @@ class PickPlaceCycle:
         from viam.proto.common import GeometriesInFrame, WorldState
         cal, s = self.s.calibration, self.s
         ref = await self.capture(require_ring=False, require_cube=False)
-        if 'ring' in ref:
-            ring_ref = calibrated_xy(cal, ref['ring']['top_center_world_mm'])
-        elif s.ring_spot:
-            ring_ref = np.array(s.ring_spot['xy_mm'])
-        else:
-            raise CycleError('Cube not in the overview view, and no ring to anchor a camera sweep')
         planner = Planner(self.motion, s, self.kin)
         world = WorldState(obstacles=[GeometriesInFrame(reference_frame='world', geometries=[
             prism('scan-objects-envelope', [400, 0, 125], [600, 800, 350])]+box_obstacles(s))])
@@ -265,21 +264,25 @@ class PickPlaceCycle:
                 await self.execute(f'sweep_{off[0]:+g}_{off[1]:+g}', path, s.sweep_speed_deg_s)
                 await asyncio.sleep(.6)
                 hits = []
+                cam_shift = np.array(pose_matrix(await self.pose(s.camera, 'world')))[:2, 3]-np.array(pose_matrix(cal['camera_pose_world']))[:2, 3]
+                # A sweep view is the overview camera translated (same orientation), so a point seen
+                # here maps to tool XY like the same pixel/depth at the overview, plus the shift:
+                # tool = cal(raw - shift) + shift = calibrated_xy(raw) + (I - R) shift.
+                # (The old ring anchor measured its correction at ring height and applied it
+                # 170 mm higher at the cube top; with a ~20 deg camera tilt that was ~20 mm off.)
+                corr = cam_shift-to_raw.T @ cam_shift
                 for _ in range(4):
                     obs = await self.capture(require_ring=False, select=select, require_cube=False)
                     issues = [i for i in obs.get('issues', []) if not i.startswith('Depth/world tabletop')]
-                    if issues or 'cube' not in obs or 'ring' not in obs:
+                    if issues or 'cube' not in obs:
                         continue
-                    corr = ring_ref-calibrated_xy(cal, obs['ring']['top_center_world_mm'])
-                    # Height: the ring rests on the calibrated table too, so it also anchors z.
-                    dz = cal['observed_ring_z_mm']-obs['ring']['top_center_world_mm'][2]
-                    cube_z = obs['cube']['top_center_world_mm'][2]+dz
+                    cube_z = obs['cube']['top_center_world_mm'][2]  # same camera height as the overview
                     if abs(cube_z-cal['observed_cube_z_mm']) > 12:
                         self.event('sweep_frame_rejected', reason=f'cube top {cube_z-cal["observed_cube_z_mm"]:+.0f} mm from the calibrated table height')
                         continue
                     hits.append((calibrated_xy(cal, obs['cube']['top_center_world_mm'])+corr, obs['cube']['world_yaw_deg']+g, obs['cube'], corr, cube_z))
                     await asyncio.sleep(.1)
-                tried.append({'shift_mm': off, 'frames_with_cube_and_ring': len(hits)})
+                tried.append({'shift_mm': off, 'frames_with_cube': len(hits)})
                 if len(hits) >= 3:
                     xy = np.median([h[0] for h in hits], axis=0)
                     yaws = np.array([h[1] for h in hits])
@@ -303,7 +306,7 @@ class PickPlaceCycle:
         cube = {**cube, 'top_center_world_mm': [float(raw[0]), float(raw[1]), cube_z],
                 'world_yaw_deg': float((yaw-g+45) % 90-45)}
         obs['cube'], obs['cubes'] = cube, [cube]
-        obs['sweep'] = {'shift_mm': off, 'ring_anchor_correction_mm': [float(c) for c in corr], 'cube_tool_xy_mm': [float(v) for v in xy]}
+        obs['sweep'] = {'shift_mm': off, 'shift_correction_mm': [float(c) for c in corr], 'cube_tool_xy_mm': [float(v) for v in xy]}
         self.observation = native(obs)
         self.event('cube_found_by_sweep', shift_mm=off, xy=[round(float(v), 1) for v in xy])
         return self.observation
@@ -419,9 +422,22 @@ class PickPlaceCycle:
         self.event('settling_camera')
         await asyncio.sleep(1)
 
+    async def workcell_scene(self):
+        """Live world poses of the machine's wall/ceiling frames -> [(frame, xyz, dims, yaw)]."""
+        scene = []
+        for o in self.s.workcell_obstacles:
+            try:
+                p = await self.pose(o['frame'], 'world')
+            except Exception as e:
+                raise CycleError(f'Scene obstacle {o["frame"]} not found in the frame system: {e}') from e
+            T = np.array(pose_matrix(p))
+            scene.append((o['frame'], T[:3, 3].tolist(), o['dims_mm'], math.degrees(math.atan2(T[1, 0], T[0, 0]))))
+        return scene
+
     async def plan(self, goal, observation=None, start=None, source=None):
         """Plan the full cycle from `start` (default: current joints). No motion."""
-        planner = Planner(self.motion, self.s, self.kin)
+        self.workcell = await self.workcell_scene()
+        planner = Planner(self.motion, self.s, self.kin, self.workcell)
         observation = observation or self.observation
         start = start or await self.joints()
         self.event('planning', goal=goal)
@@ -452,6 +468,28 @@ class PickPlaceCycle:
         obs.pop('cube', None)
         return obs
 
+    async def holding(self, reads=3):
+        """Closed loop: the vacuum gripper's holding sensor (reliable since the driver update).
+        True only if every one of `reads` quick reads agrees, so one glitch can't fake a grip."""
+        for _ in range(reads):
+            status = await self.read(lambda: self.gripper.is_holding_something(timeout=3))
+            if not status.is_holding_something:
+                return False
+            await asyncio.sleep(.1)
+        return True
+
+    async def wait_for_seal(self):
+        """At the bottom of the press: wait (up to suction_dwell_s) until the sensor reports a seal,
+        then hold seal_settle_s more so it firms up. Returns the seconds it took, or None."""
+        start = time.monotonic()
+        while time.monotonic()-start < self.s.suction_dwell_s:
+            if await self.holding(reads=1):
+                took = time.monotonic()-start
+                await asyncio.sleep(self.s.seal_settle_s)
+                return round(took, 2) if await self.holding() else None
+            await asyncio.sleep(.1)
+        return None
+
     async def run(self, goal, select='only', source='auto'):
         """One full cycle to `goal`. The cube comes from vision when it is on the table, or from
         the remembered placement when it sits in a box or on the ring (source='auto').
@@ -472,15 +510,31 @@ class PickPlaceCycle:
                     raise CycleError('Ring goal needs the ring in view from the overview')
             if remembered is not None and remembered['place'] == goal:
                 raise CycleError(f'The cube is already at {goal}')
-            plans = dict((name, (path, speed)) for name, path, speed in await self.plan(goal, source=remembered))
-            for name in ('approach', 'descend'):
-                await self.execute(name, *plans[name])
-            touched = True  # from here on a failure may leave the cube anywhere along the path
-            await self.suction_on()
-            await self.execute('press', *plans['press'])
-            self.event('suction_dwell', seconds=self.s.suction_dwell_s)
-            await asyncio.sleep(self.s.suction_dwell_s)
-            for name in ('lift', 'transfer', 'place'):
+            for attempt in range(1, self.s.pick_retries+2):
+                plans = dict((name, (path, speed)) for name, path, speed in await self.plan(goal, source=remembered))
+                for name in ('approach', 'descend'):
+                    await self.execute(name, *plans[name])
+                touched = True  # from here on a failure may leave the cube anywhere along the path
+                await self.suction_on()
+                await self.execute('press', *plans['press'])
+                sealed = await self.wait_for_seal()
+                self.event('seal', attempt=attempt, sealed=sealed is not None, seconds=sealed)
+                held = False
+                if sealed is not None:
+                    await self.execute('lift', *plans['lift'])
+                    held = await self.holding()
+                    self.event('hold_check', attempt=attempt, held=held)
+                if held:
+                    break
+                if attempt > self.s.pick_retries:
+                    raise CycleError(f'No grip (seal or lift) on all {attempt} attempts')
+                self.event('retrying_pick', attempt=attempt+1)
+                await self.go_to_overview(Planner(self.motion, self.s, self.kin))  # suction off first
+                if remembered is None or remembered['place'] in ('table', 'home'):
+                    remembered = None
+                    await self.detect(goal, select)  # find it again (it may have fallen; sweeps if needed)
+                # from a box/ring it fell back into the same place: re-pick from memory
+            for name in ('transfer', 'place'):
                 await self.execute(name, *plans[name])
             await self.suction_off()
             for name in ('retract', 'return'):
@@ -492,6 +546,83 @@ class PickPlaceCycle:
         except BaseException:
             if touched:
                 self.memory.set('unknown', how='cycle stopped or failed after suction on; check the workcell')
+            await self.stop_arm()
+            raise
+        finally:
+            await self.release_lease()
+
+    async def _carried_segment(self, planner, start, world, **kw):
+        """A carried-cube segment that also passes the swept-cube wall/ceiling check."""
+        for _ in range(5):
+            path = await planner.segment(start, world, **kw)
+            if not carried_cube_violations(self.kin, path, self.targets['grasp']['tcp_in_cube'], self.s.cube_size_mm,
+                                           self.workcell, self.s.carry_clearance_mm/2):
+                return path
+        raise CycleError('Carried cube would come too close to the wall/ceiling on every plan')
+
+    async def hover_trial(self, goal, select='only', seconds=30.0):
+        """Placement check without placing. Pick the cube, carry it to above the goal (its bottom
+        clears the rim by box_entry_clearance_mm, or clearance_mm over the ring/table), hold there
+        `seconds` so a person can judge the offset, then carry it back and set it down exactly
+        where it was picked. Cube memory is unchanged when this completes."""
+        self.events = []
+        touched = False
+        await self.preflight()
+        await self.acquire_lease()
+        try:
+            await self.go_to_overview(Planner(self.motion, self.s, self.kin))
+            remembered = self.memory.pickable_source()
+            if remembered is None:
+                await self.detect(goal, select)
+            else:
+                self.event('using_remembered_cube', place=remembered['place'])
+                self.observation = await self.look_for_obstacles()
+            if remembered is not None and remembered['place'] == goal:
+                raise CycleError(f'The cube is already at {goal}')
+            plans = dict((name, (path, speed)) for name, path, speed in await self.plan(goal, source=remembered))
+            planner = Planner(self.motion, self.s, self.kin, self.workcell)
+            for name in ('approach', 'descend'):
+                await self.execute(name, *plans[name])
+            touched = True
+            await self.suction_on()
+            await self.execute('press', *plans['press'])
+            sealed = await self.wait_for_seal()
+            self.event('seal', attempt=1, sealed=sealed is not None, seconds=sealed)
+            if sealed is None:
+                await self.go_to_overview(planner)
+                touched = False  # nothing was lifted
+                raise CycleError('No seal on the cube; hover trial stopped before lifting')
+            await self.execute('lift', *plans['lift'])
+            if not await self.holding():
+                raise CycleError('The holding sensor lost the cube at the lift')
+            await self.execute('transfer', *plans['transfer'])
+            t = self.targets
+            info = {'goal': goal, 'release_target_xy_mm': [round(t['release']['x'], 1), round(t['release']['y'], 1)],
+                    'hover_tcp_z_mm': round(t['above_place']['z'], 1), 'place_yaw_deg': t['place_yaw_deg'], 'seconds': seconds}
+            self.event('hovering', **info)
+            await asyncio.sleep(seconds)
+            info['still_held'] = await self.holding()
+            self.event('hover_done', held=info['still_held'])
+            if not info['still_held']:
+                raise CycleError('The cube dropped while hovering')
+            carried = scene_world(self.s, self.observation, t, 'carried', goal, self.workcell)
+            back = await self._carried_segment(planner, await self.joints(), carried, goal_deg=t['q_above_pick'])
+            await self.execute('return_to_pick', back, self.s.travel_speed_deg_s)
+            down = await self._carried_segment(planner, await self.joints(), carried, pose=t['contact'], straight=True,
+                                               allow=allowed_contacts(self.s, 'pickup', goal, t['source_place']))
+            await self.execute('set_down', down, self.s.approach_speed_deg_s)
+            await self.suction_off()
+            touched = False
+            at_pick = scene_world(self.s, self.observation, t, 'at_pick', goal, self.workcell)
+            up = await planner.segment(await self.joints(), at_pick, pose=t['above_pick'], straight=True,
+                                       allow=allowed_contacts(self.s, 'pickup', goal, t['source_place']))
+            await self.execute('retract', up, self.s.approach_speed_deg_s)
+            await self.go_to_overview(planner)
+            self.event('complete', goal=goal, hover_trial=True)
+            return {'hover': info, 'seal_seconds': sealed, 'cube_location': copy.deepcopy(self.memory.location)}
+        except BaseException:
+            if touched:
+                self.memory.set('unknown', how='hover trial stopped with the cube gripped; check the workcell')
             await self.stop_arm()
             raise
         finally:
