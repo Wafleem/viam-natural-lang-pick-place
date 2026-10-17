@@ -51,22 +51,38 @@ class PickPlaceCycle:
         self.events = self.events[-100:]
         self.log(f'{stage} {detail}' if detail else stage)
 
+    async def read(self, call, attempts=3):
+        """Retry a READ-ONLY robot call: the xArm driver occasionally fails single status reads
+        (seen constantly while the e-stop is latched). Never used for motion commands."""
+        for i in range(attempts):
+            try:
+                return await call()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                if i == attempts-1:
+                    raise
+                await asyncio.sleep(.2*(i+1))
+
+    async def pose(self, component, frame):
+        return MessageToDict(await self.read(lambda: self.motion.get_pose(component, frame, timeout=5)))['pose']
+
     async def joints(self):
-        return [float(v) for v in (await self.arm.get_joint_positions(timeout=3)).values]
+        return [float(v) for v in (await self.read(lambda: self.arm.get_joint_positions(timeout=3))).values]
 
     # ---- setup -------------------------------------------------------------
     async def load_kinematics(self):
         """Arm URDF + measured gripper TCP; verified against the live GetPose."""
-        kind, raw = (await self.arm.get_kinematics(timeout=10))[:2]
+        kind, raw = (await self.read(lambda: self.arm.get_kinematics(timeout=10)))[:2]
         if kind != 2:
             raise CycleError('URDF arm kinematics are required (Arm.GetKinematics returned another format)')
-        tool = MessageToDict(await self.motion.get_pose(self.s.gripper, self.s.arm, timeout=5))['pose']
+        tool = await self.pose(self.s.gripper, self.s.arm)
         T = np.array(pose_matrix(tool))
         if np.max(np.abs(T[:3, :3]-np.eye(3))) > 1e-3 or np.linalg.norm(T[:2, 3]) > .1:
             raise CycleError('Gripper frame must be a pure Z offset from the arm flange')
         kin = ArmKinematics(raw.decode() if isinstance(raw, bytes) else raw, tool_offset_mm=float(T[2, 3]))
         q = await self.joints()
-        live = np.array(pose_matrix(MessageToDict(await self.motion.get_pose(self.s.gripper, 'world', timeout=5))['pose']))
+        live = np.array(pose_matrix(await self.pose(self.s.gripper, 'world')))
         if np.linalg.norm(kin.fk(q)[:3, 3]-live[:3, 3]) > .5:
             raise CycleError('Local kinematics disagree with the frame system; is the arm still at the world origin?')
         self.kin = kin
@@ -77,10 +93,10 @@ class PickPlaceCycle:
             status = await self.lease.do_command({'action': 'status'}, timeout=5)
             if status.get('busy') or (status.get('reserved_by') and status.get('reserved_by') != self.lease_token):
                 raise CycleError(f'{self.s.lease_service} is busy or holds the arm reservation')
-        if await self.arm.is_moving(timeout=3):
+        if await self.read(lambda: self.arm.is_moving(timeout=3)):
             raise CycleError('Arm is moving')
         if self.s.camera_mount_reference:
-            actual = np.array(pose_matrix(MessageToDict(await self.motion.get_pose(self.s.camera, self.s.arm, timeout=5))['pose']))
+            actual = np.array(pose_matrix(await self.pose(self.s.camera, self.s.arm)))
             reference = np.array(pose_matrix(self.s.camera_mount_reference))
             if np.linalg.norm(actual[:3, 3]-reference[:3, 3]) > .5 or np.max(np.abs(actual[:3, :3]-reference[:3, :3])) > 1e-3:
                 raise CycleError('Camera mount transform differs from the calibrated camera_mount_reference')
@@ -117,8 +133,8 @@ class PickPlaceCycle:
     # ---- perception --------------------------------------------------------
     async def capture(self, require_ring, select='only'):
         q0 = await self.joints()
-        props = MessageToDict(await self.camera.get_properties(timeout=5))
-        pose = MessageToDict(await self.motion.get_pose(self.s.camera, 'world', timeout=5))['pose']
+        props = MessageToDict(await self.read(lambda: self.camera.get_properties(timeout=5)))
+        pose = await self.pose(self.s.camera, 'world')
         images, meta = await self.camera.get_images(timeout=10)
         stamp = MessageToDict(meta).get('capturedAt')
         if not stamp or abs(time.time()-datetime.fromisoformat(stamp.replace('Z', '+00:00')).timestamp()) > 3:

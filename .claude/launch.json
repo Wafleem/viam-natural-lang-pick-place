@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "dashboard",
+      "runtimeExecutable": "pickplace-module/.venv/bin/python",
+      "runtimeArgs": ["dashboard/server.py"],
+      "port": 8765
+    }
+  ]
+}

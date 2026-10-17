@@ -214,3 +214,19 @@ def test_measure_box_requires_overview(settings, kin, urdf):
     with pytest.raises(CycleError, match='overview'):
         asyncio.run(cycle.survey_box('box2'))
     assert arm.moves == []
+
+
+def test_transient_read_errors_are_retried_but_moves_are_not(settings, kin, urdf):
+    cycle, arm, *_ = make_cycle(settings, kin, urdf, settings.overview_joints_deg)
+    real, fails = arm.get_joint_positions, {'n': 2}
+
+    async def flaky(timeout=None):
+        if fails['n']:
+            fails['n'] -= 1
+            raise RuntimeError('xArm: Emergency Stop Button Pushed In;')
+        return await real(timeout)
+    arm.get_joint_positions = flaky
+    assert asyncio.run(cycle.joints()) == pytest.approx(settings.overview_joints_deg)
+    fails['n'] = 5
+    with pytest.raises(RuntimeError, match='Emergency'):
+        asyncio.run(cycle.joints())
