@@ -29,5 +29,7 @@ Safety:
 - **STOP** cancels code-2's command and stops the arm. It is a software stop; keep the e-stop in reach.
 - Config and version changes restart code-2 and ask for confirmation.
 
+Keyboard and accessibility: use Tab to reach the screen tabs, Left/Right or Home/End to focus a tab, and Enter/Space to open it. Hold the microphone button with mouse/touch, or use Enter/Space to start and stop listening. Listening stops when leaving Run or hiding the browser tab. Errors are announced to screen readers and stay visible until dismissed; Dismiss returns keyboard focus to the originating control. Joint buttons and form fields have accessible labels. On narrow screens, panels stack and wide tables scroll within their own region.
+
 Tests (`make test-dashboard`) run the server against a fake robot. They check the safety gates,
 allowlists and config helpers.
