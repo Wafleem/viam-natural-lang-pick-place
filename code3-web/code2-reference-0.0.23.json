@@ -1,0 +1,31 @@
+{
+  "resource": "code-2",
+  "module_id": "hackathons:armfarm19-vision-pickplace",
+  "module_version": "0.0.23",
+  "implementation": "vision-cube-ring-box-v21-surveyed-one-cycle",
+  "observed_at": "2026-10-17T00:22Z",
+  "provenance": "Read-only: do_command/status sections in the inline editor (Sunny's Chrome) plus one Viam MCP status DoCommand. Some editor lines were withheld by the browser tool's output filter; no full-source hash.",
+  "reference_only": true,
+  "commands": {
+    "ring": "{action:'start', goal:'ring', request_id, workcell_ready:true}; goal must be explicit because default_goal is box",
+    "box": "{action:'box_once', request_id, workcell_ready:true}; rejected unless surveyed_box_enabled is true; always targets the box",
+    "start_goal_box": "still sweeps then aborts unless box_execution_enabled; code-3 does not use it"
+  },
+  "live_status": {
+    "surveyed_box_enabled": true,
+    "box_execution_enabled": false,
+    "require_all_targets": true,
+    "available_goals": [
+      "ring",
+      "box"
+    ]
+  },
+  "start_contract": {
+    "goal_values": [
+      "ring",
+      "box"
+    ],
+    "request_id": "optional string 1-80; generated when omitted; in-memory dedup",
+    "workcell_ready": "must be true"
+  }
+}
