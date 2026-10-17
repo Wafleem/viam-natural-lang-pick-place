@@ -33,6 +33,16 @@ def _obstacles(value):
     return [{'frame': o['frame'], 'dims_mm': [float(v) for v in o['dims_mm']]} for o in value]
 
 
+def _camera_correction(value):
+    if value is None:
+        return None
+    m = value.get('matrix') if isinstance(value, dict) else None
+    if not (isinstance(m, list) and len(m) == 4 and all(isinstance(r, list) and len(r) == 4 for r in m)):
+        raise ValueError('camera_correction needs {"depth_scale": k, "matrix": 4x4}')
+    k = _number(value, 'depth_scale', 1.0, .8, 1.2)
+    return {'depth_scale': k, 'matrix': [[float(v) for v in r] for r in m]}
+
+
 def _joints(value, label):
     if not isinstance(value, list) or len(value) != 6 or any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) for v in value):
         raise ValueError(label+' needs six finite joint angles (degrees)')
@@ -63,9 +73,12 @@ class Settings:
     # The builtin planner does not check a WorldState-attached cube against frame-system
     # geometry, so these are added to the plan request explicitly.
     workcell_obstacles: list = field(default_factory=lambda: [
-        {'frame': 'wall-front', 'dims_mm': [100.0, 3000.0, 1600.0]},
-        {'frame': 'ceiling', 'dims_mm': [3000.0, 3000.0, 100.0]}])
-    carry_clearance_mm: float = 25.0  # swept-cube check margin against those obstacles
+        {'frame': 'wall-front', 'dims_mm': [100.0, 3000.0, 483.0]},
+        {'frame': 'wall-front-2', 'dims_mm': [100.0, 3000.0, 1277.0]},
+        {'frame': 'ceiling', 'dims_mm': [3000.0, 3000.0, 100.0]},
+        {'frame': 'cardboard-box', 'dims_mm': [349.0, 286.0, 254.0]}])
+    carry_clearance_mm: float = 50.0  # planner keeps this from those obstacles; the sweep check half of it
+    carry_upright_deg: float = 15.0  # carried joint moves keep the tool within this of vertical (no cube swing)
     box_entry_clearance_mm: float = 30.0
     # Camera sweep when the cube is not fully seen from the overview: sideways shifts (dx, dy mm)
     # of the overview camera at the same height and orientation, and the sweep speed.
@@ -81,6 +94,10 @@ class Settings:
     acceleration_deg_s2: float = 6.0
     joint_limit_margin_deg: float = 5.0
     camera_mount_reference: dict | None = None
+    # Replacement camera -> the calibrated one: its depth is scaled by depth_scale, then points in
+    # its frame map into the calibrated camera's frame by `matrix` (4x4). The task calibration
+    # (overview fit, box, ring) then stays valid. Fit from fixed table features; see DEPLOYMENT.md.
+    camera_correction: dict | None = None
     arm: str = 'arm'
     gripper: str = 'Vgripper'
     camera: str = 'cam'
@@ -120,20 +137,22 @@ class Settings:
             seal_settle_s=_number(attrs, 'seal_settle_s', 0.5, 0, 5),
             clearance_mm=_number(attrs, 'clearance_mm', 100, 30, 300),
             workcell_obstacles=_obstacles(attrs.get('workcell_obstacles')),
-            carry_clearance_mm=_number(attrs, 'carry_clearance_mm', 25, 0, 200),
+            carry_clearance_mm=_number(attrs, 'carry_clearance_mm', 50, 0, 200),
+            carry_upright_deg=_number(attrs, 'carry_upright_deg', 15, 2, 90),
             box_entry_clearance_mm=_number(attrs, 'box_entry_clearance_mm', 30, 10, 200),
             release_above_goal_mm=_number(attrs, 'release_above_goal_mm', 0, 0, 50),
             sweep_offsets_mm=_offsets(attrs.get('sweep_offsets_mm', [[0, 120], [0, 240], [0, 330], [0, -120], [100, 0]])),
-            sweep_speed_deg_s=_number(attrs, 'sweep_speed_deg_s', 15, 1, 20),
+            sweep_speed_deg_s=_number(attrs, 'sweep_speed_deg_s', 15, 1, 40),
             grasp_toward_image_top_mm=_number(attrs, 'grasp_toward_image_top_mm', 0, 0, 20),
             placement_correction_world_xy_mm=[float(v) for v in correction],
             placement_world_yaw_deg=_number(attrs, 'placement_world_yaw_deg', 0, -180, 180),
-            travel_speed_deg_s=_number(attrs, 'travel_speed_deg_s', 10, 0.5, 20),
-            approach_speed_deg_s=_number(attrs, 'approach_speed_deg_s', 3, 0.5, 10),
+            travel_speed_deg_s=_number(attrs, 'travel_speed_deg_s', 10, 0.5, 40),
+            approach_speed_deg_s=_number(attrs, 'approach_speed_deg_s', 3, 0.5, 20),
             press_speed_deg_s=_number(attrs, 'press_speed_deg_s', 2, 0.2, 5),
             acceleration_deg_s2=_number(attrs, 'acceleration_deg_s2', 6, 1, 50),
             joint_limit_margin_deg=_number(attrs, 'joint_limit_margin_deg', 5, 1, 30),
             camera_mount_reference=mount if isinstance(mount, dict) else None,
+            camera_correction=_camera_correction(attrs.get('camera_correction')),
             arm=_name(attrs, 'arm', 'arm'), gripper=_name(attrs, 'gripper', 'Vgripper'),
             camera=_name(attrs, 'camera', 'cam'), motion=_name(attrs, 'motion', 'builtin'),
             lease_service=_name(attrs, 'lease_service', 'code-1'),

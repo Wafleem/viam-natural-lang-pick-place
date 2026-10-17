@@ -115,7 +115,10 @@ def make_cycle(settings, kin, urdf, joints):
         ('cam', 'arm'): lambda: pif('arm', settings.camera_mount_reference),
         ('cam', 'world'): lambda: pif('world', camera.meta['camera_pose_world']),
         ('wall-front', 'world'): lambda: pif('world', {'x': 1000, 'y': 51, 'z': 454, 'o_z': 1}),  # the fake planner can't route around it
+        ('wall-front-2', 'world'): lambda: pif('world', {'x': 1100, 'y': 51, 'z': 615.5, 'o_z': 1}),
         ('ceiling', 'world'): lambda: pif('world', {'z': 1304, 'o_z': 1}),
+        ('cardboard-box', 'world'): lambda: pif('world', {'x': 1200, 'y': 51, 'z': 888.5, 'o_z': 1}),
+        ('cardboard-box', 'world'): lambda: pif('world', {'x': 1200, 'y': 51, 'z': 888.5, 'o_z': 1}),
     }
     return PickPlaceCycle(settings, arm, gripper, camera, motion, lease), arm, gripper, motion, lease
 

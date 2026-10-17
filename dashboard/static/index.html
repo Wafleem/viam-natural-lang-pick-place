@@ -155,8 +155,9 @@
       <button class="flow" onclick="flow('recover')">RECOVER &amp; HOME<small>clear error → recover limits → overview</small></button>
       <button class="flow" onclick="flow('box')">CUBE → BOX<small>overview → dry run → pick &amp; place</small></button>
       <button class="flow" onclick="flow('ring')">CUBE → RING<small>overview → dry run → pick &amp; place</small></button>
-      <button class="flow" onclick="flow('home')">CUBE → HOME<small>reset_cube from box / ring</small></button>
+      <button class="flow" onclick="flow('home')">CUBE → HOME<small>reset_cube: from box / ring (skips if already on the table)</small></button>
       <button class="flow" onclick="flow('tour')">FULL TOUR<small>box → home → ring → home</small></button>
+      <button class="flow" onclick="flow('hover')">HOVER TEST<small>hold the cube over the box, then set it back</small></button>
     </div>
     <div class="row"><button onclick="abortFlow()">abort flow</button><span class="muted" id="flowstate">idle · ⚠ flows move the arm: tick workcell clear first</span>
       <span class="muted">cube is at <b id="cubeat">?</b></span>
@@ -628,15 +629,11 @@ const go = (action, extra) => async () => { const r = await api('/api/command', 
   if (r.accepted === false) throw new Error(r.already_running ? 'code-2 busy' : 'duplicate'); return waitIdle(action); };
 const still = (action, extra) => async () => { await api('/api/command', {action, ...extra}); return waitIdle(action); };
 async function placeCube(goal) {
-  await step('reset → overview', go('reset'));
-  const loc = (await api('/api/command', {action:'status'})).cube_location || {};
-  if (['ring', 'box'].includes(loc.place) && loc.place !== goal) {
-    await step(`pick_place ${loc.place} → ${goal} (remembered grip)`, go('pick_place', {place:{goal}}));
-  } else {
-    await step(`dry_run → ${goal} (sweeps if needed)`, still('dry_run', {pick:{object:'cube', select:'only'}, place:{goal}, workcell_ready:true}));
-    await step(`pick_place → ${goal}`, go('pick_place', {pick:{object:'cube', select:'only'}, place:{goal}}));
-  }
-  const s = await api('/api/command', {action:'status'}), o = (s.last_result || {}).outcome;
+  // One command: code-2 goes to the overview, finds the cube by camera (sweeping if needed; it falls
+  // back to its memory only if the cube is not on the table), places it, and parks at the overview.
+  await step(`pick_place → ${goal} (sweep, pick, place, back to overview)`, go('pick_place', {pick:{object:'cube', select:'only'}, place:{goal}}));
+  const s = await api('/api/command', {action:'status'}), r = s.last_result || {}, o = r.outcome;
+  if (r.moved === false) stepLine(r.detail, 'ok');
   if (o) stepLine('vision: ' + o.detail, o.cube_left_pick_spot === false || o.cube_at_goal === false ? 'bad' : 'ok');
 }
 async function flow(name) {
@@ -659,6 +656,9 @@ async function flow(name) {
     } else if (name === 'home') {
       await step('reset_cube → home', go('reset_cube'));
       const o = ((await api('/api/command', {action:'status'})).last_result || {}).outcome; if (o) stepLine('vision: ' + o.detail, o.cube_at_goal === false ? 'bad' : 'ok');
+    } else if (name === 'hover') {
+      await step('hover_trial → box (hover 20 s, then set the cube back)', go('hover_trial', {goal:'box', hover_s:20}));
+      const h = ((await api('/api/command', {action:'status'})).last_result || {}).hover; if (h) stepLine(`hovered over ${JSON.stringify(h.release_target_xy_mm)}; still held: ${h.still_held}`, 'ok');
     } else if (name === 'tour') {
       for (const g of ['box', 'home', 'ring', 'home']) { if (g === 'home') await step('reset_cube → home', go('reset_cube')); else await placeCube(g); }
     } else await placeCube(name);
