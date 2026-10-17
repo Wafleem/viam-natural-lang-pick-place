@@ -105,7 +105,15 @@ class PickPlaceCycle:
                 raise CycleError('Camera mount transform differs from the calibrated camera_mount_reference')
         await self.load_kinematics()
 
+    async def clear_controller(self):
+        """A collision trip latches the xArm controller; clearing it never moves the arm."""
+        try:
+            await self.arm.do_command({'clear_error': True}, timeout=10)
+        except Exception as e:
+            self.event('clear_error_failed', error=str(e)[:120])
+
     async def acquire_lease(self):
+        await self.clear_controller()
         if self.lease is None:
             return
         token = str(uuid.uuid4())
@@ -262,7 +270,13 @@ class PickPlaceCycle:
                     if issues or 'cube' not in obs or 'ring' not in obs:
                         continue
                     corr = ring_ref-calibrated_xy(cal, obs['ring']['top_center_world_mm'])
-                    hits.append((calibrated_xy(cal, obs['cube']['top_center_world_mm'])+corr, obs['cube']['world_yaw_deg']+g, obs['cube'], corr))
+                    # Height: the ring rests on the calibrated table too, so it also anchors z.
+                    dz = cal['observed_ring_z_mm']-obs['ring']['top_center_world_mm'][2]
+                    cube_z = obs['cube']['top_center_world_mm'][2]+dz
+                    if abs(cube_z-cal['observed_cube_z_mm']) > 12:
+                        self.event('sweep_frame_rejected', reason=f'cube top {cube_z-cal["observed_cube_z_mm"]:+.0f} mm from the calibrated table height')
+                        continue
+                    hits.append((calibrated_xy(cal, obs['cube']['top_center_world_mm'])+corr, obs['cube']['world_yaw_deg']+g, obs['cube'], corr, cube_z))
                     await asyncio.sleep(.1)
                 tried.append({'shift_mm': off, 'frames_with_cube_and_ring': len(hits)})
                 if len(hits) >= 3:
@@ -271,7 +285,7 @@ class PickPlaceCycle:
                     ref_yaw = yaws[0]
                     yaw = float(np.median(ref_yaw+(yaws-ref_yaw+45) % 90-45))
                     if max(np.linalg.norm(h[0]-xy) for h in hits) <= 5:
-                        found = (xy, yaw, hits[-1][2], np.median([h[3] for h in hits], axis=0), off)
+                        found = (xy, yaw, hits[-1][2], np.median([h[3] for h in hits], axis=0), off, float(np.median([h[4] for h in hits])))
                         break
             if found is None:
                 raise CycleError('Cube not found in the overview or the sweep views: '+json.dumps(tried))
@@ -280,12 +294,12 @@ class PickPlaceCycle:
             if len(back) > 1 and max(abs(x-y) for x, y in zip(back[0], back[-1])) > .1:
                 await self.execute('sweep_return', back, s.sweep_speed_deg_s)
             await asyncio.sleep(.6)
-        xy, yaw, cube, corr, off = found
+        xy, yaw, cube, corr, off, cube_z = found
         obs = copy.deepcopy(ref)
         obs['camera_pose_world'], obs['camera_intrinsics'] = cal['camera_pose_world'], cal['camera_intrinsics']
         obs['observation_joints_deg'] = list(s.overview_joints_deg)
         raw = to_raw @ (xy-np.asarray(cal['xy_offset_mm']))
-        cube = {**cube, 'top_center_world_mm': [float(raw[0]), float(raw[1]), float(cal['observed_cube_z_mm'])],
+        cube = {**cube, 'top_center_world_mm': [float(raw[0]), float(raw[1]), cube_z],
                 'world_yaw_deg': float((yaw-g+45) % 90-45)}
         obs['cube'], obs['cubes'] = cube, [cube]
         obs['sweep'] = {'shift_mm': off, 'ring_anchor_correction_mm': [float(c) for c in corr], 'cube_tool_xy_mm': [float(v) for v in xy]}

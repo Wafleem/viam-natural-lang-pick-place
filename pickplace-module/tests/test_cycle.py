@@ -27,7 +27,7 @@ def pif(frame, d):
 
 class FakeArm:
     def __init__(self, urdf, joints):
-        self.urdf, self.q, self.moves = urdf, list(joints), []
+        self.urdf, self.q, self.moves, self.commands = urdf, list(joints), [], []
 
     async def get_joint_positions(self, timeout=None):
         return type('J', (), {'values': list(self.q)})()
@@ -47,7 +47,7 @@ class FakeArm:
         self.moves.append(('stop', None))
 
     async def do_command(self, command, timeout=None):
-        self.moves.append(('do_command', command))
+        self.commands.append(command)
         return {}
 
 
@@ -160,7 +160,7 @@ def test_joint_at_limit_requires_recovery(settings, kin, urdf):
         asyncio.run(cycle.run('box'))
     assert arm.moves[-1] == ('stop', None)
     result = asyncio.run(cycle.recover_limits())
-    assert ('do_command', {'clear_error': True}) in arm.moves
+    assert {'clear_error': True} in arm.commands
     assert result['to'][3] == pytest.approx(360-settings.joint_limit_margin_deg)
     assert result['to'][:3] == pytest.approx(FAILED_LIFT[:3]) and result['to'][4:] == pytest.approx(FAILED_LIFT[4:])
     assert arm.moves[-1][1] == 2

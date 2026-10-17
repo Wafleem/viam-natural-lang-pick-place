@@ -66,7 +66,7 @@ def test_targets_press_ten_mm_and_keep_margins(settings, observation, kin, goal)
     t = compute_targets(settings, observation, goal, kin, settings.overview_joints_deg)
     contact_z = settings.calibration['pickup_tcp_z_mm']
     assert t['contact']['z'] == pytest.approx(contact_z)
-    assert t['press']['z'] == pytest.approx(contact_z-10)
+    assert t['press']['z'] == pytest.approx(contact_z-settings.press_depth_mm)
     assert t['pre_contact']['z'] == pytest.approx(contact_z+20)
     assert {k: t['press'][k] for k in 'xy'} == {k: t['contact'][k] for k in 'xy'}
     for q in (t['q_above_pick'], t['q_above_place']):
