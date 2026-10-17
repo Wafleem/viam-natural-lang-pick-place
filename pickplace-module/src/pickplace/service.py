@@ -40,7 +40,7 @@ from .config import Settings
 from .cycle import PickPlaceCycle
 from .vision_geometry import CUBE_SELECTORS
 
-IMPLEMENTATION = 'pickplace-v1-open-loop-suction-press'
+IMPLEMENTATION = 'pickplace-v1-open-loop-suction-press+dynamic-scene'
 LOGGER = getLogger(__name__)
 API_VERSION = 1
 CYCLE_ACTIONS = {'pick_place', 'run', 'box_once', 'ring_once'}
@@ -84,7 +84,8 @@ class PickPlaceService(Generic, EasyResource):
         return {
             'implementation': IMPLEMENTATION, 'state': self.state, 'stage': c.stage, 'busy': self.busy(),
             'error': self.error, 'request_id': self.request_id, 'default_goal': s.default_goal,
-            'goals': s.goals,
+            'goals': s.goals, 'box_tracking': s.box_tracking,
+            'scene': copy.deepcopy(c.scene_report),
             'suction': {'mode': 'open_loop', 'holding_feedback_used': False, 'press_depth_mm': s.press_depth_mm,
                         'suction_dwell_s': s.suction_dwell_s, 'release_dwell_s': s.release_dwell_s},
             'speeds_deg_s': {'travel': s.travel_speed_deg_s, 'approach': s.approach_speed_deg_s, 'press': s.press_speed_deg_s},

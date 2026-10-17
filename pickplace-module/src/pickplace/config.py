@@ -59,6 +59,9 @@ class Settings:
     camera: str = 'cam'
     motion: str = 'builtin'
     lease_service: str = 'code-1'
+    # dynamic-scene branch: "cached" keeps configured box poses; "live" re-measures every box
+    # at the overview each cycle. A box entry with "track": true is re-measured either way.
+    box_tracking: str = 'cached'
 
     @classmethod
     def from_attributes(cls, attrs):
@@ -98,7 +101,10 @@ class Settings:
             arm=_name(attrs, 'arm', 'arm'), gripper=_name(attrs, 'gripper', 'Vgripper'),
             camera=_name(attrs, 'camera', 'cam'), motion=_name(attrs, 'motion', 'builtin'),
             lease_service=_name(attrs, 'lease_service', 'code-1'),
+            box_tracking=_name(attrs, 'box_tracking', 'cached'),
         )
+        if s.box_tracking not in ('cached', 'live'):
+            raise ValueError('box_tracking must be "cached" or "live"')
         if s.press_depth_mm >= s.pre_contact_mm+s.cube_size_mm/2:
             raise ValueError('press_depth_mm is unreasonably deep for this cube')
         return s
@@ -133,7 +139,7 @@ class Settings:
         return names+([self.lease_service] if self.lease_service else [])
 
 
-BOX_KEYS = ('floor_center_world_mm', 'placement_center_xy_mm', 'inner_dimensions_mm', 'world_yaw_deg', 'rim_z_mm')
+BOX_KEYS = ('floor_center_world_mm', 'placement_center_xy_mm', 'inner_dimensions_mm', 'world_yaw_deg', 'rim_z_mm', 'track')
 
 
 def _box(raw, label):
@@ -159,6 +165,10 @@ def _box(raw, label):
                 raise ValueError(f'{label}.{key} must be a non-empty string')
             box[key] = raw[key].lower() if key == 'color' else raw[key]
     box.setdefault('color', 'orange')
+    if 'track' in raw:
+        if not isinstance(raw['track'], bool):
+            raise ValueError(label+'.track must be true or false')
+        box['track'] = raw['track']
     if min(box['inner_dimensions_mm']) <= 0 or box['rim_z_mm'] <= box['floor_center_world_mm'][2]:
         raise ValueError(label+' needs a positive opening and a rim above its floor')
     return box
