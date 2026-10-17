@@ -7,6 +7,7 @@ code-2 are busy. Never moves hardware; viam-server reloads code-2 afterwards.
 
     .venv/bin/python tools/select_version.py --version 0.0.25
     .venv/bin/python tools/select_version.py --version 0.0.25 --attributes config/code2-attributes.json --apply
+    .venv/bin/python tools/select_version.py --version 0.0.32 --set 'home={"xy_mm":[363.8,240.3],"yaw_deg":1.4}' --apply
     .venv/bin/python tools/select_version.py --version 0.0.24 --apply        # roll back
 """
 import argparse
@@ -28,13 +29,15 @@ MODULE_ID = json.loads((ROOT/'meta.json').read_text())['module_id']
 SERVICE = 'code-2'
 
 
-def updated(config, version, attributes):
+def updated(config, version, attributes, sets=()):
     want = copy.deepcopy(config)
     module = next(m for m in want['modules'] if m.get('module_id') == MODULE_ID)
     module['version'] = version
+    service = next(s for s in want['services'] if s.get('name') == SERVICE)
     if attributes is not None:
-        service = next(s for s in want['services'] if s.get('name') == SERVICE)
         service['attributes'] = attributes
+    for key, value in sets:  # merge single keys into the existing attributes
+        service['attributes'][key] = value
     return want
 
 
@@ -48,10 +51,15 @@ async def main(args):
         part = await app.get_robot_part(PART_ID)
         current = part.robot_config
         module = next(m for m in current['modules'] if m.get('module_id') == MODULE_ID)
-        want = updated(current, args.version, attributes)
+        sets = [(item.split('=', 1)[0], json.loads(item.split('=', 1)[1])) for item in args.set]
+        want = updated(current, args.version, attributes, sets)
+        sys.path.insert(0, str(ROOT/'src'))
+        from pickplace.config import Settings
+        Settings.from_attributes(next(s for s in want['services'] if s.get('name') == SERVICE)['attributes'])
         changed = [k for k in want if want[k] != current.get(k)]
         print(json.dumps({'mode': 'apply' if args.apply else 'preview', 'current_version': module.get('version'),
                           'new_version': args.version, 'attributes_replaced': attributes is not None,
+                          'attributes_set': [k for k, _ in sets],
                           'changed_sections': changed}, indent=2))
         if not args.apply or not changed:
             return
@@ -79,5 +87,6 @@ if __name__ == '__main__':
     p = argparse.ArgumentParser()
     p.add_argument('--version', required=True)
     p.add_argument('--attributes', help='JSON file to use as the code-2 service attributes')
+    p.add_argument('--set', action='append', default=[], metavar='KEY=JSON', help='merge one attribute, e.g. home={...}')
     p.add_argument('--apply', action='store_true')
     asyncio.run(main(p.parse_args()))

@@ -155,6 +155,20 @@ Check the workcell, then use `release` and/or `reset`.
 
 Keep the physical e-stop in reach. The software `stop` is not an e-stop.
 
+### Layout: one cube, three places
+
+All positions are tool XY in mm. +x points from the arm toward the front wall.
+
+| Place | Where | How code-2 knows |
+|---|---|---|
+| `home` | (363.8, 240.3), yaw 1.4°: where the cube sat in the last run | config `home`; the cube is found by vision here, at any yaw |
+| `box` | floor centre (298.2, −143.1), yaw −4.93° | config `box` (measured). **Don't move it**: the narrow-side gap is 1.4 mm |
+| `ring` | (300, −470): directly beyond the box, about 8 cm past its far wall | config `ring` (fixed spot, outside the camera view). The cube on a 230 mm ring tolerates a few cm of error |
+
+Commands: `pick_place` to `home`/`ring`/`box`, `reset_cube` (back home from wherever code-2
+put it), `set_cube_location` (after moving the cube by hand). The dashboard's big buttons run
+whole flows: PRE-FLIGHT, RECOVER & HOME, CUBE → BOX / RING / HOME, FULL TOUR.
+
 ### Workcell rules
 
 - **Boxes**: each must stay where it was accepted. The current `box` has floor centre

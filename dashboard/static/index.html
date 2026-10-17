@@ -423,7 +423,7 @@ async function flow(name) {
     if (name === 'check') {
       await step('self_test', still('self_test'));
       const st = (await api('/api/command', {action:'status'})).last_result || {}; stepLine('self_test ok: ' + st.ok, st.ok ? 'ok' : 'bad');
-      for (const goal of ['box', 'ring']) await step(`live plan check → ${goal}`, async () => { const r = await api('/api/plan_check', {goal, frame:0}); if (!r.ok) throw new Error(r.error); return r; });
+      for (const goal of ['box', 'ring']) await step(`live plan check → ${goal} (saved overview frame)`, async () => { const r = await api('/api/plan_check', {goal, frame:0}); if (!r.ok) throw new Error(r.error); return r; });
     } else if (name === 'recover') {
       await step('clear controller error', () => api('/api/arm/do', {command:'clear_error'}));
       await step('recover_limits', go('recover_limits'));
