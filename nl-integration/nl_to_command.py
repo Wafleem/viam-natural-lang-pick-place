@@ -78,7 +78,15 @@ def _parse(text, describe):
     low, words = text.lower(), _words(text)
     if any(w in words for w in ('stop', 'halt', 'freeze', 'abort')):
         return {'command': {'action': 'stop'}, 'moves': False, 'explanation': 'Stop the arm now'}
-    if 'cube' in words and any(p in low for p in ('reset', 'put it back', 'back home', 'put the cube back', 'cube back', 'return the cube')):
+    # SET (no motion): the operator is telling code-2 where the cube already is.
+    if re.search(r"\b(cube|block|it)('s|s| is| was) (now )?(at |back )?(home|back|reset)\b", low) \
+            or re.search(r"\bi (put|moved|placed|set|brought) (the )?(cube|block|it) (back|home)", low) \
+            or re.search(r"\b(mark|set|record) (the )?(cube|block)( location)? (as |to |at )?(home|reset)", low):
+        return {'command': {'action': 'set_cube_location', 'place': 'home'}, 'moves': False,
+                'explanation': 'Note that the cube is already on its home spot (nothing moves)'}
+    # TAKE (moves): fetch the cube from wherever it is (box, shelf, ring, table) to its home spot.
+    if any(w in words for w in ('cube', 'block', 'it')) and any(p in low for p in ('reset', 'put it back', 'back home', 'put the cube back', 'cube back',
+                                                                                 'return the cube', 'bring the cube home', 'take the cube home', 'bring it home', 'take it home', 'cube home')):
         return {'command': {'action': 'reset_cube'}, 'moves': True, 'explanation': 'Put the cube back on its home spot'}
     if any(p in low for p in ('go home', 'reset', 'home position', 'overview')):
         return {'command': {'action': 'reset'}, 'moves': True, 'explanation': 'Return the arm to the overview pose'}

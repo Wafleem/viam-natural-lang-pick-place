@@ -79,3 +79,15 @@ def test_clean_text_is_not_rewritten_and_motion_words_are_not_guessed():
 ])
 def test_two_boxes_by_colour_or_place(text, place):
     assert parse(text)['command']['place'] == place
+
+
+@pytest.mark.parametrize('text', ['the cube is home', 'the cube is back', 'I put the cube back', 'I moved the cube home', 'mark the cube as home', 'the cube is reset'])
+def test_set_cube_home_does_not_move(text):
+    r = parse(text)
+    assert r['command'] == {'action': 'set_cube_location', 'place': 'home'} and r['moves'] is False
+
+
+@pytest.mark.parametrize('text', ['reset the cube', 'bring the cube home', 'take the cube home', 'put the cube back', 'return the cube'])
+def test_take_cube_home_moves(text):
+    r = parse(text)
+    assert r['command'] == {'action': 'reset_cube'} and r['moves'] is True
