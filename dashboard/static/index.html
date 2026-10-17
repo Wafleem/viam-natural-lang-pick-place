@@ -428,10 +428,12 @@ function speakReply(message, token, replyToken) {
   try {
     const utterance = new window.SpeechSynthesisUtterance(message); currentReply = utterance;
     utterance.lang = document.documentElement.lang || 'en';
-    const voices = synthesis.getVoices();
-    const localVoice = voices.find(v => v.localService && v.lang.toLowerCase().startsWith('en') && v.default)
-      || voices.find(v => v.localService && v.lang.toLowerCase().startsWith('en'));
-    if (localVoice) utterance.voice = localVoice;
+    // A little brighter and quicker, with the best installed English voice available.
+    utterance.rate = 1.12; utterance.pitch = 1.06;
+    const localVoices = synthesis.getVoices().filter(v => v.localService && /^en(?:-|$)/i.test(v.lang));
+    const localVoice = localVoices.find(v => /natural|enhanced|premium|neural/i.test(v.name))
+      || localVoices.find(v => v.default) || localVoices[0];
+    if (localVoice) { utterance.voice = localVoice; utterance.lang = localVoice.lang; }
     utterance.onend = () => { if (currentReply === utterance) { currentReply = null; $('voice-reply-status').textContent = 'Spoken reply finished.'; } };
     utterance.onerror = () => { if (currentReply === utterance) { currentReply = null; $('voice-reply-status').textContent = 'Audio unavailable. Read the response below.'; } };
     $('voice-reply-status').textContent = 'Replying…'; synthesis.speak(utterance);
@@ -446,8 +448,9 @@ function spokenInterpretation(result) {
       : `into the ${p.color ? p.color + ' box' : target}`;
     task = `${c.action === 'dry_run' ? 'plan moving' : 'move'} ${cube} ${destination}`;
   }
-  return 'I understood: ' + task + '. ' + (result.moves
-    ? 'Confirm the workcell is clear, then press Send to robot.' : 'Press Send to robot when you are ready.');
+  task = task.charAt(0).toLowerCase() + task.slice(1);
+  return 'Got it! You want to ' + task + '. ' + (result.moves
+    ? "Check the workcell is clear, then press Send to robot when you're ready." : "Press Send to robot when you're ready.");
 }
 try { $('spoken-replies').checked = localStorage.getItem('uv-spoken-replies') !== 'false'; } catch (e) {}
 if (!synthesis) { $('spoken-replies').checked = false; $('spoken-replies').disabled = true; }
@@ -503,7 +506,7 @@ async function voiceParse(token, replyToken) {
   const options = guesses.filter(Boolean);
   if (!currentVoice(token)) return;
   if (!options.length) {
-    const message = "I didn't catch that. Please try again, or type your command.";
+    const message = "I missed that one! Could you say it again, or type it in?";
     say('bad', message); speakReply(message, token, replyToken); return;
   }
   let chosen, result, error;
@@ -515,7 +518,7 @@ async function voiceParse(token, replyToken) {
   }
   if (!result) {
     say('bad', "Sorry, I didn't understand that. " + (error?.message || 'Please try again.'));
-    speakReply("I couldn't match that to a supported command. Please try again, or type your command.", token, replyToken); return;
+    speakReply("Hmm, I don't know that command yet. Try asking me to move the cube to the box or the ring.", token, replyToken); return;
   }
   $('nltext').value = chosen; presentInterpretation(result);
   say($('nlexplain').dataset.kind, `🎤 heard "${chosen}"` + (options.length > 1 && chosen !== options[0] ? ` (best of ${options.length} guesses)` : '') + ' — ' + $('nlexplain').textContent);

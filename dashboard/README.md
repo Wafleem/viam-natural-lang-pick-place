@@ -35,3 +35,5 @@ Tests (`make test-dashboard`) run the server against a fake robot. They check th
 allowlists and config helpers.
 
 Voice replies: after a spoken instruction is interpreted, the browser reads back the supported task and asks you to review and press Send. It also responds when speech is empty or unsupported. The default-on Spoken replies checkbox mutes playback and remembers the preference. Playback stops when starting another recording, editing/checking text, leaving Run, or hiding the page. Replies acknowledge interpretation; they do not execute commands or report robot completion. Text feedback remains available if browser speech synthesis is unavailable or blocked.
+
+Voice style: replies use warmer conversational wording, a slightly brighter pitch (1.06), and a modestly faster pace (1.12). The browser prefers local English voices labeled Natural, Enhanced, Premium, or Neural, then its local English default. Available voice quality depends on the browser and installed system voices.
