@@ -105,3 +105,10 @@ def test_other_cubes_become_obstacles(settings, observation, kin):
     t = compute_targets(settings, obs, 'box', kin, settings.overview_joints_deg)
     labels = [g.label for g in scene_world(settings, obs, t, 'at_pick', 'box').obstacles[0].geometries]
     assert labels.count('other-cube-1') == 1 and 'other-cube-0' not in labels
+
+
+def test_legacy_start_still_accepted(attrs, kin, urdf):
+    svc = make_service(Settings.from_attributes(attrs), kin, urdf)
+    assert svc._arguments('start', {'goal': 'ring'}) == {'select': 'only', 'goal': 'ring'}
+    with pytest.raises(ValueError, match='workcell_ready'):
+        asyncio.run(svc.do_command({'action': 'start', 'goal': 'ring'}))
