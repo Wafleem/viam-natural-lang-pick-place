@@ -2,7 +2,7 @@
 
 Translate locally → inspect the meaning → acknowledge the reviewed task and clear workcell → **Send reviewed command** once. The browser connects directly to the existing Viam `code-2` generic service using the official TypeScript SDK. No robot source/config change or code-3 service deployment is required.
 
-**Implementation verified offline only. No live connection, robot status RPC, movement command or physical test was performed.** Code-2 remains unchanged. The checked reference is now code-2 0.0.19 (`vision-cube-ring-box-v17-wrist-camera-survey`, see `../code2-reference-0.0.19.json`); its implementation identifier is checked at connection, but that identifier alone does not prove the exact running source version or physical readiness. Code-2 is under active development, so this frontend ("code-3") is realigned to it periodically; until then a newer code-2 implementation keeps Send locked.
+**Verified offline (51 tests, Node 22).** This frontend ("code-3") targets code-2's `pick_place` API. The implementation id is checked by prefix on every status read; it does not prove physical readiness.
 
 ## Run
 
@@ -35,23 +35,27 @@ Only the unresolved request ID is journaled in `sessionStorage` before dispatch,
 
 ## Payload and supported task
 
-The unapproved preview is deliberately blocked:
+Integrated with code-2's `pick_place` API (pickplace-module ≥ 0.0.30; implementation ids starting
+`pickplace-v1`). See `../../nl-integration/command_schema.json` and `{"action":"describe"}`.
 
-```json
-{"action":"start","goal":"ring","workcell_ready":false}
-```
+| Said | Sent after review |
+|---|---|
+| Move the cube to the ring | `{"action":"pick_place","pick":{"object":"cube","select":"only"},"place":{"type":"ring"}}` |
+| Put the left cube into the orange box | `{"action":"pick_place","pick":{"object":"cube","select":"left"},"place":{"color":"orange"}}` |
+| Put the rightmost cube in the box | `{"action":"pick_place","pick":{"object":"cube","select":"right"},"place":{"type":"box"}}` |
 
-Only after explicit review does the controller create the submitted payload:
+Each send also carries a fresh UUID `request_id` and `workcell_ready: true`, and only after the
+explicit review checkbox. The unapproved preview always has `workcell_ready: false`.
 
-```json
-{"action":"start","goal":"ring","request_id":"<UUID v4>","workcell_ready":true}
-```
+- Still unsupported, shown but never sent: paper markers, non-white cubes, ring colour or side,
+  boxes chosen by side, and "inside the ring" or "on the box".
+- Send stays locked unless status is fresh and from a `pickplace-v1` implementation, code-2 is
+  idle and calibrated, and the place target exists in `status.goal_details`. For a coloured box,
+  a box of that colour must be configured.
+- The transport accepts only `status` and this exact `pick_place` shape.
 
-The transport is exactly `new GenericServiceClient(machine, 'code-2').doCommand(payload, {timeoutMs:15000})`. The adapter permits only `status` and this exact `start` shape; it never calls arm/gripper APIs directly. No request is sent merely by typing, translating, copying, reviewing or receiving speech.
-
-Code-2 0.0.12 supports a fixed, unqualified cube/block → ring/hoop placement on top. It has no color, left/right, marker or box selector fields. Those meanings remain visible but cannot be sent. The saved config has one calibrated overview and five camera-only search views, with zero calibrated sweep views. `search` also moves the arm; if `start` finds targets only at a camera-only view, it reports missing pickup calibration instead of picking there. Calibration flags indicate configuration presence, not verified metrology or workcell readiness.
-
-Source snapshot and SHA metadata: `../code2-reference-0.0.12.py` and `../code2-reference-0.0.12.json`. No scene IDs, object identities, motion plans or coordinates are invented by the web app.
+The previous `start`/`box_once` contract (code-2 0.0.23) is described in `../code2-reference-0.0.23.json`
+for history. code-2 still accepts `start` as a legacy alias.
 
 ## Viam-hosted users
 

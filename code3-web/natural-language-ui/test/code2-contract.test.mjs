@@ -1,35 +1,38 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
 import { parseIntent } from '../src/parser.js';
-import { CODE2_REFERENCE, previewCode2Command } from '../src/code2-contract.js';
+import { CODE2_REFERENCE, isSupportedImplementation, previewCode2Command } from '../src/code2-contract.js';
 
-test('unqualified cube-to-ring paraphrases match only a deliberately blocked start template', () => {
+const T = (select, place) => ({ action: 'pick_place', pick: { object: 'cube', select }, place, workcell_ready: false });
+
+test('unqualified cube-to-ring paraphrases match only a deliberately blocked pick_place template', () => {
   for (const text of ['Move the cube to the ring', 'Grab cube and put it on ring',
     'Transfer the block onto the hoop', 'Please place cube on top of ring']) {
     const result = parseIntent(text);
     assert.equal(result.status, 'parsed', text);
     const mapping = previewCode2Command(result.intent);
     assert.equal(mapping.status, 'template_only', text);
-    assert.deepEqual(mapping.command_template, { action: 'start', goal: 'ring', workcell_ready: false });
-    assert.equal('plan_id' in mapping.command_template, false);
+    assert.deepEqual(mapping.command_template, T('only', { type: 'ring' }));
     assert.equal('source_selector' in mapping.command_template, false);
   }
 });
 
-test('cube into the box maps to goal box; cube on the box has no command', () => {
-  assert.deepEqual(previewCode2Command(parseIntent('Put the cube into the box').intent).command_template,
-    { action: 'box_once', workcell_ready: false });
+test('cube into a box maps to place type/colour; cube on the box has no command', () => {
+  assert.deepEqual(previewCode2Command(parseIntent('Put the cube into the box').intent).command_template, T('only', { type: 'box' }));
+  assert.deepEqual(previewCode2Command(parseIntent('Put the cube into the orange box').intent).command_template, T('only', { color: 'orange' }));
   assert.equal(previewCode2Command(parseIntent('Put the cube on the box').intent).command_template, null);
 });
 
-test('qualifiers and unsupported destinations remain intact and cannot turn into generic start', () => {
-  for (const text of ['Move the white cube to the ring', 'Move the rightmost cube to the hoop',
-    'Move cube to red ring', 'Move cube to ring on the left',
+test('left/right cube and the white cube colour map onto the pick selector', () => {
+  assert.deepEqual(previewCode2Command(parseIntent('Move the rightmost cube to the hoop').intent).command_template, T('right', { type: 'ring' }));
+  assert.deepEqual(previewCode2Command(parseIntent('Grab the left cube and put it inside the blue box').intent).command_template, T('left', { color: 'blue' }));
+  assert.deepEqual(previewCode2Command(parseIntent('Move the white cube to the ring').intent).command_template, T('only', { type: 'ring' }));
+});
+
+test('unsupported qualifiers remain intact and cannot turn into a generic command', () => {
+  for (const text of ['Move the red cube to the ring', 'Move cube to red ring', 'Move cube to ring on the left',
     'Move cube with pink paper to ring', 'Move cube to ring with pink paper',
-    'Grab white cube put inside box', 'Put cube in box with pink paper',
-    'Put cube inside ring', 'Move cube to cube']) {
+    'Put cube in box with pink paper', 'Put cube in the left box', 'Put cube inside ring', 'Move cube to cube']) {
     const result = parseIntent(text);
     assert.equal(result.status, 'parsed', text);
     const original = structuredClone(result.intent);
@@ -49,11 +52,10 @@ test('unknown or incomplete intent fields cannot be silently discarded', () => {
   }
 });
 
-test('mapping identifies the exact saved code-2 source snapshot rather than implying live readiness', async () => {
-  const reference = JSON.parse(await readFile(new URL('../../code2-reference-0.0.23.json', import.meta.url), 'utf8'));
-  assert.equal(reference.reference_only, true);
-  assert.equal(CODE2_REFERENCE.version, reference.module_version);
-  assert.equal(CODE2_REFERENCE.implementation, reference.implementation);
-  assert.ok(reference.start_contract.goal_values.includes(CODE2_REFERENCE.goal));
-  assert.equal(CODE2_REFERENCE.goal, 'ring');
+test('implementation check accepts the pick_place module family only', () => {
+  assert.equal(isSupportedImplementation(CODE2_REFERENCE.implementation), true);
+  assert.equal(isSupportedImplementation('pickplace-v1-open-loop-suction-press+dynamic-scene'), true);
+  for (const old of ['vision-cube-ring-box-v21-surveyed-one-cycle', 'vision-cube-ring-box-v17-wrist-camera-survey', '', null]) {
+    assert.equal(isSupportedImplementation(old), false);
+  }
 });

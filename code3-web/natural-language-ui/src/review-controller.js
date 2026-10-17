@@ -1,10 +1,10 @@
 // Transport-independent policy. No SDK, DOM, timers, persistence, or automatic RPCs.
 import { parseIntent } from './parser.js';
-import { CODE2_REFERENCE, previewCode2Command } from './code2-contract.js';
+import { describeTarget, isSupportedImplementation, placeTarget, previewCode2Command } from './code2-contract.js';
 
 export const STATUS_MAX_AGE_MS = 5000;
-const READY_STATES = new Set(['idle', 'observed', 'planned', 'found', 'complete', 'failed', 'stopped']);
-const ACTIVE_STATES = new Set(['detect', 'plan', 'run_once', 'start', 'search', 'sweep_calibrate', 'box_once', 'planning', 'running']);
+const READY_STATES = new Set(['idle', 'complete', 'failed', 'stopped']);
+const ACTIVE_STATES = new Set(['running']);
 const TERMINAL_STATES = new Set(['complete', 'failed', 'stopped']);
 const copy = value => value == null ? value : JSON.parse(JSON.stringify(value));
 const freeze = value => {
@@ -14,7 +14,12 @@ const freeze = value => {
   }
   return value;
 };
-const goalOf = template => template.action === 'box_once' ? 'box' : template.goal;
+// Is the template's place target configured on the robot right now (status.goal_details)?
+const goalAvailable = (template, status) => {
+  const target = placeTarget(template), goals = status.goal_details;
+  if (target.type === 'ring') return status.available_goals.includes('ring');
+  return goals.some(g => g.type === 'box' && (!target.color || g.color === target.color));
+};
 const intentKey = intent => JSON.stringify([intent.schema_version, intent.action,
   ...['source_selector', 'destination_selector'].map(key => {
     const s = intent[key]; return [s.kind, s.color, s.spatial, s.marker];
@@ -103,7 +108,7 @@ export class ReviewController {
     }
     this._review = freeze({ intent: copy(parsed.intent), text: this._text, revision: this._revision,
       generation: this._generation, consumed: false, command_template: copy(mapping.command_template) });
-    this._message = `Review this cube-to-${goalOf(mapping.command_template)} request and confirm the workcell is ready.`;
+    this._message = `Review this ${describeTarget(mapping.command_template)} request and confirm the workcell is ready.`;
     this._emit(); return true;
   }
   acknowledge(value) {
@@ -113,11 +118,12 @@ export class ReviewController {
 
   _validStatus(status) {
     return status && typeof status === 'object' && !Array.isArray(status)
-      && status.implementation === CODE2_REFERENCE.implementation
+      && isSupportedImplementation(status.implementation)
       && typeof status.calibrated === 'boolean' && typeof status.busy === 'boolean'
       && (READY_STATES.has(status.state) || ACTIVE_STATES.has(status.state))
       && typeof status.request_id === 'string' && status.request_id.length <= 80
-      && Array.isArray(status.available_goals);
+      && Array.isArray(status.available_goals) && Array.isArray(status.goal_details)
+      && status.goal_details.every(g => g && typeof g.name === 'string' && ['ring', 'box'].includes(g.type));
   }
   _blockedReason(requireAcknowledgment) {
     if (!this._transport) return 'disconnected';
@@ -130,9 +136,7 @@ export class ReviewController {
     if (!Number.isFinite(age) || age < 0 || age > STATUS_MAX_AGE_MS) return 'status_stale';
     if (!this._status.calibrated) return 'calibration_required';
     if (this._status.busy || !READY_STATES.has(this._status.state)) return 'service_busy';
-    const goal = goalOf(this._review.command_template);
-    if (!this._status.available_goals.includes(goal)) return 'goal_unavailable';
-    if (goal === 'box' && this._status.surveyed_box_enabled !== true) return 'box_disabled';
+    if (!goalAvailable(this._review.command_template, this._status)) return 'goal_unavailable';
     if (requireAcknowledgment && !this._acknowledged) return 'acknowledgment_required';
     return null;
   }
@@ -154,12 +158,13 @@ export class ReviewController {
       const previous = this._status;
       const status = { implementation: reply.implementation, calibrated: reply.calibrated,
         busy: reply.busy, state: reply.state, request_id: reply.request_id,
-        available_goals: [...reply.available_goals], surveyed_box_enabled: reply.surveyed_box_enabled === true,
+        available_goals: [...reply.available_goals],
+        goal_details: reply.goal_details.map(g => ({ name: g.name, type: g.type, color: typeof g.color === 'string' ? g.color : null })),
         stage: typeof reply.stage === 'string' ? reply.stage : '',
         error: typeof reply.error === 'string' ? reply.error : '',
         calibration_error: typeof reply.calibration_error === 'string' ? reply.calibration_error : '' };
       this._status = status; this._statusAt = startedAt;
-      if (previous && ['implementation', 'calibrated', 'busy', 'state', 'request_id', 'surveyed_box_enabled'].some(key => previous[key] !== status[key])) {
+      if (previous && ['implementation', 'calibrated', 'busy', 'state', 'request_id'].some(key => previous[key] !== status[key])) {
         this._acknowledged = false;
       }
       if (!status.calibrated || status.busy || !READY_STATES.has(status.state)) this._acknowledged = false;
@@ -213,7 +218,7 @@ export class ReviewController {
     this._review = freeze({ ...this._review, consumed: true }); this._acknowledged = false;
     this._request = { request_id: requestId, phase: 'sending', resolved: false };
     this._lastCommand = freeze({ ...command }); this._status = null; this._statusAt = null;
-    this._message = 'Sending one reviewed start request. Do not repeat it.'; this._emit();
+    this._message = 'Sending one reviewed pick_place request. Do not repeat it.'; this._emit();
     if (generation !== this._generation || revision !== this._revision || transport !== this._transport) {
       if (this._resolveRequest('not_sent')) this._message = 'The review or connection changed before dispatch. Nothing was sent.';
       this._emit();
@@ -227,7 +232,7 @@ export class ReviewController {
         this._request.phase = 'accepted';
         this._message = 'Code-2 accepted this request. Read status to confirm its outcome; acceptance is not completion.';
       } else if (this._validStatus(reply) && reply.busy === true && reply.accepted === false && reply.already_running === true) {
-        if (this._resolveRequest('rejected_busy')) this._message = 'Code-2 rejected this start because another task was already running. Nothing is retried.';
+        if (this._resolveRequest('rejected_busy')) this._message = 'Code-2 rejected this request because another task was already running. Nothing is retried.';
       } else {
         this._request.phase = 'unknown';
         this._message = 'Send outcome is uncertain. Read status; this request will not be retried.';

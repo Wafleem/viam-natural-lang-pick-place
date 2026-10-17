@@ -34,8 +34,7 @@ const reasons = {
   calibration_required: 'Code-2 reports that calibration is required.',
   service_busy: 'Code-2 is busy. Wait for its current task to finish.',
   acknowledgment_required: 'Confirm your task review and that the workcell is clear.',
-  goal_unavailable: 'Code-2 does not currently offer this destination.',
-  box_disabled: 'Code-2 has its box workflow switched off (surveyed_box_enabled is false). Box tasks stay locked until it is enabled.',
+  goal_unavailable: 'Code-2 has no configured destination matching this request (check the box colour).',
 };
 const phases = { sending: 'Sending', accepted: 'Accepted', running: 'Running', complete: 'Completed',
   failed: 'Failed', stopped: 'Stopped', unknown: 'Unknown', rejected_busy: 'Rejected · busy', not_sent: 'Not sent' };
