@@ -48,6 +48,9 @@ class Settings:
     release_dwell_s: float = 1.0
     clearance_mm: float = 100.0
     box_entry_clearance_mm: float = 30.0
+    # Camera sweep when the cube is not fully seen from the overview: base-joint pans (deg) and speed.
+    sweep_j1_offsets_deg: list = field(default_factory=lambda: [8.0, -8.0, 16.0, -16.0])
+    sweep_speed_deg_s: float = 15.0
     release_above_goal_mm: float = 0.0
     grasp_toward_image_top_mm: float = 0.0
     placement_correction_world_xy_mm: list = field(default_factory=lambda: [0.0, 0.0])
@@ -96,6 +99,8 @@ class Settings:
             clearance_mm=_number(attrs, 'clearance_mm', 100, 30, 300),
             box_entry_clearance_mm=_number(attrs, 'box_entry_clearance_mm', 30, 10, 200),
             release_above_goal_mm=_number(attrs, 'release_above_goal_mm', 0, 0, 50),
+            sweep_j1_offsets_deg=_offsets(attrs.get('sweep_j1_offsets_deg', [8, -8, 16, -16])),
+            sweep_speed_deg_s=_number(attrs, 'sweep_speed_deg_s', 15, 1, 20),
             grasp_toward_image_top_mm=_number(attrs, 'grasp_toward_image_top_mm', 0, 0, 20),
             placement_correction_world_xy_mm=[float(v) for v in correction],
             placement_world_yaw_deg=_number(attrs, 'placement_world_yaw_deg', 0, -180, 180),
@@ -158,6 +163,12 @@ def _home(raw):
     if isinstance(yaw, bool) or not isinstance(yaw, (int, float)) or not math.isfinite(yaw):
         raise ValueError('home.yaw_deg must be a finite number')
     return {'xy_mm': [float(v) for v in xy], 'yaw_deg': float(yaw)}
+
+
+def _offsets(raw):
+    if not isinstance(raw, list) or len(raw) > 8 or any(isinstance(v, bool) or not isinstance(v, (int, float)) or abs(v) > 40 for v in raw):
+        raise ValueError('sweep_j1_offsets_deg: up to 8 base-joint offsets within +/-40 deg')
+    return [float(v) for v in raw]
 
 
 def _ring(raw):

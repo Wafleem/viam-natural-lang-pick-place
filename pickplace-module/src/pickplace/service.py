@@ -46,7 +46,7 @@ IMPLEMENTATION = 'pickplace-v1-open-loop-suction-press'
 LOGGER = getLogger(__name__)
 API_VERSION = 1
 CYCLE_ACTIONS = {'pick_place', 'run', 'box_once', 'ring_once', 'start'}  # start: pre-0.0.25 clients
-MOTION_ACTIONS = CYCLE_ACTIONS | {'reset', 'recover_limits', 'reset_cube'}
+MOTION_ACTIONS = CYCLE_ACTIONS | {'reset', 'recover_limits', 'reset_cube', 'scan'}
 STILL_ACTIONS = {'dry_run', 'measure_box', 'self_test'}  # background tasks that never move the arm
 
 
@@ -112,6 +112,8 @@ class PickPlaceService(Generic, EasyResource):
                 self.last_result = {'at_overview': True}
             elif action == 'recover_limits':
                 self.last_result = await self.cycle.recover_limits()
+            elif action == 'scan':
+                self.last_result = await self.cycle.scan(args.get('select', 'only'))
             elif action == 'reset_cube':
                 self.last_result = await self.cycle.reset_cube()
             elif action == 'dry_run':
@@ -145,6 +147,7 @@ class PickPlaceService(Generic, EasyResource):
                 'run': {'moves': True}, 'box_once': {'moves': True}, 'ring_once': {'moves': True},
                 'start': {'moves': True, 'note': 'legacy alias of run, kept for older clients'},
                 'reset': {'moves': True}, 'recover_limits': {'moves': True},
+                'scan': {'moves': True, 'note': 'camera only: overview, then a sweep if the cube is not fully in view'},
                 'reset_cube': {'moves': True, 'note': 'put the cube back on its home spot from wherever code-2 placed it'},
                 'set_cube_location': {'moves': False, 'example': {'action': 'set_cube_location', 'place': 'box'},
                                       'note': 'tell code-2 where the cube is after moving it by hand (unknown, table, or a goal)'},
@@ -163,6 +166,9 @@ class PickPlaceService(Generic, EasyResource):
             if not isinstance(name, str) or not name or name == 'ring':
                 raise ValueError('measure_box needs a "name" for the new box')
             return {'name': name}
+        if action == 'scan':
+            pick = command.get('pick', {})
+            return {'select': pick.get('select', 'only') if isinstance(pick, dict) else 'only'}
         if action not in CYCLE_ACTIONS | {'dry_run'}:
             return args
         pick = command.get('pick', {})
@@ -209,7 +215,7 @@ class PickPlaceService(Generic, EasyResource):
             return self.status()
         if action not in MOTION_ACTIONS | STILL_ACTIONS:
             raise ValueError('Unknown action. Use describe, status, self_test, dry_run, measure_box, pick_place, run, '
-                             'box_once, ring_once, reset_cube, set_cube_location, reset, recover_limits, release, stop')
+                             'box_once, ring_once, scan, reset_cube, set_cube_location, reset, recover_limits, release, stop')
         if self.busy():
             return {**self.status(), 'accepted': False, 'already_running': True}
         if action in MOTION_ACTIONS and command.get('workcell_ready') is not True:
