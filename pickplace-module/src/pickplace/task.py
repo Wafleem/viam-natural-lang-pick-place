@@ -56,11 +56,14 @@ def compute_targets(settings, observation, goal, kinematics, start_joints_deg):
         place_base_yaw = s.placement_world_yaw_deg
 
     pick_z, place_z = cube_top[2], goal_top[2]
-    above_z = max(pick_z, place_z)+s.clearance_mm
-    # Every configured box is in the workcell: the carried cube bottom (TCP - cube size)
-    # stays clearance_mm above the highest rim.
-    for other in s.boxes.values():
-        above_z = max(above_z, other['rim_z_mm']+size+s.clearance_mm)
+    # Approach heights, each side on its own. A shared, high carry height (rim + cube + 100 mm)
+    # pushed the wrist onto the J4 ~ 0/360 branch; the taught J4 ~ 180 branch reaches about
+    # 360 mm above the cube. The planner routes the transfer around boxes with the carried cube.
+    above_pick_z = pick_z+s.clearance_mm
+    above_place_z = place_z+s.clearance_mm
+    if box is not None:
+        # Carried cube bottom (TCP - cube size) clears this box's rim before the vertical entry.
+        above_place_z = max(above_place_z, box['rim_z_mm']+size+s.box_entry_clearance_mm)
 
     # Pickup yaw: four equivalent square orientations; keep the one nearest the start.
     best = None
@@ -68,7 +71,7 @@ def compute_targets(settings, observation, goal, kinematics, start_joints_deg):
         yaw = detected_yaw+90*k
         offset = grasp_offset(observation, cal, yaw, s.grasp_toward_image_top_mm)
         contact = downward_pose(cube_top+offset, yaw)
-        above = {**contact, 'z': above_z}
+        above = {**contact, 'z': above_pick_z}
         try:
             q = kinematics.ik(above, start_joints_deg, margin)
             kinematics.ik({**contact, 'z': pick_z-s.press_depth_mm}, q, margin)
@@ -87,7 +90,7 @@ def compute_targets(settings, observation, goal, kinematics, start_joints_deg):
         if box is not None:
             check_cube_fits(box, size, goal_top, place_yaw)
         release = place_tcp(goal_top, place_yaw, grasp)
-        above = {**release, 'z': above_z}
+        above = {**release, 'z': above_place_z}
         try:
             q = kinematics.ik(above, q_above_pick, margin)
             kinematics.ik(release, q, margin)
