@@ -85,6 +85,7 @@ def test_two_boxes_by_colour_or_place(text, place):
 def test_set_cube_home_does_not_move(text):
     r = parse(text)
     assert r['command'] == {'action': 'set_cube_location', 'place': 'home'} and r['moves'] is False
+    validate(r['command'])
 
 
 @pytest.mark.parametrize('text', ['reset the cube', 'bring the cube home', 'take the cube home', 'put the cube back', 'return the cube'])
