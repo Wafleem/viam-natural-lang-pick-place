@@ -552,9 +552,13 @@ class PickPlaceCycle:
         try:
             await self.go_to_overview(Planner(self.motion, self.s, self.kin))
             remembered = await self.locate_cube(goal, select, self.memory.pickable_source() if source == 'auto' else source)
-            if remembered is None and on_table == 'skip':
-                self.event('complete', goal=goal, detail='cube is already on the table; nothing to do')
-                return {'moved': False, 'detail': 'cube is already on the table', 'cube_location': copy.deepcopy(self.memory.location)}
+            if remembered is None and on_table == 'skip_if_home' and self.s.home:
+                from .calibration import calibrated_xy
+                seen = (self.observation.get('sweep') or {}).get('cube_tool_xy_mm') or calibrated_xy(self.s.calibration, self.observation['cube']['top_center_world_mm'])
+                off = float(np.linalg.norm(np.asarray(seen[:2], float)-np.asarray(self.s.home['xy_mm'], float)))
+                if off <= 15:
+                    self.event('complete', goal=goal, detail=f'cube is already on the home spot ({off:.0f} mm away)')
+                    return {'moved': False, 'detail': f'cube is already home ({off:.0f} mm from the spot)', 'cube_location': copy.deepcopy(self.memory.location)}
             if remembered is not None and goal == 'ring' and not self.s.ring_spot and 'ring' not in self.observation:
                 raise CycleError('Ring goal needs the ring in view from the overview')
             if remembered is not None and remembered['place'] == goal:
@@ -708,12 +712,13 @@ class PickPlaceCycle:
             await self.release_lease()
 
     async def reset_cube(self):
-        """Put the cube back on its home table spot from the box or ring (vision first; a cube already
-        on the table is left where it is)."""
+        """Put the cube exactly on its home table spot, from the box, the ring or anywhere on the
+        table (vision first; memory when the camera cannot see it on the table)."""
         if not self.s.home:
             raise CycleError('No home spot configured (attribute "home": {"xy_mm": [x, y], "yaw_deg": a})')
-        # Looks first: if someone already put the cube back on the table, nothing moves but the camera.
-        return await self.run('home', on_table='skip')
+        # Looks first, then really resets: from the box, the ring or anywhere on the table onto the
+        # home spot. Only a cube already within 15 mm of the spot is left alone.
+        return await self.run('home', on_table='skip_if_home')
 
     def set_location(self, place, goals):
         """Operator correction after moving the cube by hand. No motion."""
