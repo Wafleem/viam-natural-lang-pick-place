@@ -26,7 +26,7 @@ from .kinematics import ArmKinematics
 from .memory import CubeMemory
 from .planning import Planner, allowed_contacts, carried_cube_violations, scene_world
 from .task import compute_targets
-from .transforms import pose_matrix
+from .transforms import matrix_pose, pose_matrix
 from .vision_geometry import analyze, consensus_observation, decode_depth, native
 
 
@@ -166,9 +166,15 @@ class PickPlaceCycle:
             raise CycleError('Arm moved during camera capture')
         attrs = {'cube_size_mm': self.s.cube_size_mm, 'table_z_mm': self.s.table_z_mm}
         depth_mm = decode_depth(depth.data)
-        obs = await asyncio.to_thread(analyze, bgr, depth_mm, props, pose, attrs, require_ring, select, require_cube)
-        obs.update(capture_time=stamp, observation_joints_deg=q0)
-        self.last_frame = (bgr, depth_mm, props, pose)
+        geometry_pose = pose
+        corr = self.s.camera_correction
+        if corr:  # replacement camera: rescale its depth and map its frame onto the calibrated one
+            depth_mm = depth_mm*corr['depth_scale']
+            geometry_pose = matrix_pose((np.array(pose_matrix(pose)) @ np.array(corr['matrix'])).tolist())
+        obs = await asyncio.to_thread(analyze, bgr, depth_mm, props, geometry_pose, attrs, require_ring, select, require_cube)
+        # The view check compares the arm's camera frame with the calibration's, so keep the raw one.
+        obs.update(capture_time=stamp, observation_joints_deg=q0, camera_pose_world=pose)
+        self.last_frame = (bgr, depth_mm, props, geometry_pose)
         return obs
 
     async def survey_box(self, name, frames=3):
@@ -208,7 +214,7 @@ class PickPlaceCycle:
         except CycleError as e:
             text = str(e)
             if not any(k in text for k in ('No cube in view', 'clipped', 'Cube top surface', 'Need exactly one full cube',
-                                         'Surface tilt', 'No horizontal surface')):
+                                         'Surface tilt', 'No horizontal surface', 'Detected cube top dimensions', 'Cube height does not match')):
                 raise
             self.event('cube_not_in_overview', reason=text[:120])
             if not allow_sweep:

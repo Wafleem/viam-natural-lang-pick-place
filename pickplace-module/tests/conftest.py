@@ -18,7 +18,15 @@ from pickplace.vision_geometry import analyze  # noqa: E402
 
 @pytest.fixture(scope='session')
 def attrs():
-    return json.loads((ROOT/'config'/'code2-attributes.json').read_text())
+    """Live attributes, but for the camera that recorded the saved test frames: no replacement-
+    camera correction, and that camera's own intrinsics."""
+    from pickplace.vision_geometry import intrinsics
+    a = json.loads((ROOT/'config'/'code2-attributes.json').read_text())
+    a.pop('camera_correction', None)
+    meta = json.loads((DATA/'overview_0.json').read_text())
+    depth = np.load(DATA/'overview_0_depth.npz')['depth']
+    a['task_calibration'] = {**a['task_calibration'], 'camera_intrinsics': intrinsics(meta['properties'], depth.shape)}
+    return a
 
 
 @pytest.fixture(scope='session')
