@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>armfarm19 test bench</title>
+<style>
+  :root { --bg:#f6f7f9; --panel:#fff; --ink:#1b1f24; --muted:#5b6470; --line:#dde1e6; --accent:#2257d6;
+          --warn:#b4231b; --ok:#1d7a3a; --code:#f0f2f5; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#111418; --panel:#191d22; --ink:#e6e9ed; --muted:#9aa3ad; --line:#2a3038; --accent:#6f9bff;
+            --warn:#ff7b72; --ok:#56d364; --code:#0d1014; } }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif; background:var(--bg); color:var(--ink); }
+  header { display:flex; flex-wrap:wrap; gap:12px; align-items:center; padding:12px 16px; border-bottom:1px solid var(--line);
+           background:var(--panel); position:sticky; top:0; z-index:2; }
+  header h1 { font-size:16px; margin:0 12px 0 0; }
+  .pill { padding:2px 8px; border-radius:999px; border:1px solid var(--line); color:var(--muted); font-size:12px; }
+  .pill.busy { color:var(--accent); border-color:var(--accent); } .pill.err { color:var(--warn); border-color:var(--warn); }
+  main { display:grid; gap:16px; padding:16px; grid-template-columns:repeat(auto-fit,minmax(340px,1fr)); }
+  section { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px; min-width:0; }
+  h2 { font-size:13px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); margin:0 0 10px; }
+  button { font:inherit; padding:6px 10px; border-radius:7px; border:1px solid var(--line); background:var(--bg);
+           color:var(--ink); cursor:pointer; }
+  button:hover { border-color:var(--accent); } button.move { border-color:var(--accent); color:var(--accent); }
+  button.stop { background:var(--warn); color:#fff; border-color:var(--warn); font-weight:600; }
+  .row { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin:6px 0; }
+  select,input[type=text],input[type=number] { font:inherit; padding:5px 7px; border-radius:6px; border:1px solid var(--line);
+           background:var(--bg); color:var(--ink); }
+  input[type=number] { width:70px; }
+  textarea { width:100%; min-height:110px; font:12px/1.4 ui-monospace,Menlo,monospace; background:var(--code); color:var(--ink);
+             border:1px solid var(--line); border-radius:6px; padding:8px; }
+  pre { background:var(--code); border-radius:6px; padding:8px; margin:6px 0 0; font:12px/1.4 ui-monospace,Menlo,monospace;
+        max-height:320px; overflow:auto; white-space:pre-wrap; word-break:break-word; }
+  table { border-collapse:collapse; width:100%; font-variant-numeric:tabular-nums; }
+  td,th { padding:3px 4px; border-bottom:1px solid var(--line); text-align:left; }
+  img { width:100%; border-radius:6px; background:var(--code); min-height:120px; }
+  label.clear { font-weight:600; } .muted { color:var(--muted); font-size:12px; } .wide { grid-column:1/-1; }
+</style>
+</head>
+<body>
+<header>
+  <h1>armfarm19 test bench</h1>
+  <span id="state" class="pill">connecting…</span>
+  <span id="stage" class="pill">stage —</span>
+  <label class="clear"><input type="checkbox" id="clear"> workcell clear (enables motion)</label>
+  <button class="stop" onclick="stopAll()">STOP</button>
+  <span class="muted">Software stop only — keep the physical e-stop in reach.</span>
+</header>
+<main>
+  <section>
+    <h2>Pick &amp; place</h2>
+    <div class="row">Pick cube
+      <select id="select"><option>only</option><option>left</option><option>right</option><option>nearest</option><option>farthest</option></select>
+      place on <select id="place"><option value="ring">ring</option></select></div>
+    <div class="row">
+      <button onclick="send(task('dry_run'))">Dry run (no motion)</button>
+      <button class="move" onclick="send(task('pick_place'), true)">Pick &amp; place</button></div>
+    <div class="row">
+      <button onclick="send({action:'describe'})">describe</button>
+      <button onclick="send({action:'status'})">status</button>
+      <button onclick="send({action:'self_test'})">self_test</button>
+      <button onclick="send({action:'release'})">release suction</button></div>
+    <div class="row">
+      <button class="move" onclick="send({action:'reset'}, true)">reset → overview</button>
+      <button class="move" onclick="send({action:'recover_limits'}, true)">recover_limits</button></div>
+    <div class="row">New box name <input type="text" id="boxname" value="box2" size="10">
+      <button onclick="send({action:'measure_box', name:val('boxname')})">measure_box (no motion)</button></div>
+    <p class="muted">Results arrive in <b>status → last_result</b>; long commands return immediately.</p>
+  </section>
+
+  <section>
+    <h2>Raw DoCommand (exactly what the web app sends)</h2>
+    <textarea id="raw">{"action": "pick_place", "pick": {"object": "cube", "select": "left"}, "place": {"color": "orange"}, "workcell_ready": true}</textarea>
+    <div class="row"><button onclick="sendRaw()">Send to code-2</button></div>
+    <pre id="reply">—</pre>
+  </section>
+
+  <section>
+    <h2>Camera (cam)</h2>
+    <img id="cam" alt="wrist camera">
+    <div class="row"><button onclick="snap()">Refresh</button>
+      <label><input type="checkbox" id="live"> live (1 fps)</label></div>
+  </section>
+
+  <section>
+    <h2>Arm</h2>
+    <table id="joints"><tr><th>Joint</th><th>deg</th><th>jog</th></tr></table>
+    <div class="row">step <input type="number" id="step" value="2" min="0.1" max="10" step="0.1"> deg
+      speed <input type="number" id="speed" value="2" min="0.5" max="5" step="0.5"> deg/s</div>
+    <div class="row muted" id="tcp">TCP —</div>
+    <p class="muted">Jogs are direct joint moves without collision checking. Refused while code-2 is busy.</p>
+  </section>
+
+  <section>
+    <h2>Gripper (vacuum)</h2>
+    <div class="row"><button class="move" onclick="grip('grab')">Suction on</button>
+      <button onclick="grip('open')">Suction off</button></div>
+    <p class="muted">Open loop: there is no reliable "holding" reading.</p>
+  </section>
+
+  <section class="wide">
+    <h2>code-2 config</h2>
+    <div class="row"><button onclick="loadConfig()">Load from machine</button>
+      <button onclick="saveConfig(false)">Validate</button>
+      <button class="move" onclick="saveConfig(true)">Apply to machine</button>
+      <span class="muted" id="cfgnote"></span></div>
+    <textarea id="config" style="min-height:260px"></textarea>
+  </section>
+
+  <section class="wide">
+    <h2>Status</h2>
+    <pre id="status">—</pre>
+  </section>
+</main>
+<script>
+const $ = id => document.getElementById(id), val = id => $(id).value;
+const show = (el, data) => $(el).textContent = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+async function api(path, body) {
+  const r = await fetch(path, body === undefined ? {} : {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  const data = await r.json().catch(() => ({error: r.statusText}));
+  if (!r.ok) throw new Error(data.error || r.statusText);
+  return data;
+}
+function task(action) {
+  return {action, pick:{object:'cube', select:val('select')}, place:{goal:val('place')}};
+}
+async function send(cmd, moves) {
+  if (moves) {
+    if (!$('clear').checked) { show('reply', 'Tick "workcell clear" first.'); return; }
+    cmd.workcell_ready = true; cmd.request_id = 'bench-' + Date.now();
+  }
+  $('raw').value = JSON.stringify(cmd);
+  try { show('reply', await api('/api/command', cmd)); } catch (e) { show('reply', 'Error: ' + e.message); }
+}
+async function sendRaw() {
+  let cmd; try { cmd = JSON.parse(val('raw')); } catch (e) { show('reply', 'Invalid JSON: ' + e.message); return; }
+  if (cmd.workcell_ready && !$('clear').checked) { show('reply', 'Tick "workcell clear" first.'); return; }
+  try { show('reply', await api('/api/command', cmd)); } catch (e) { show('reply', 'Error: ' + e.message); }
+}
+async function stopAll() {
+  try { await api('/api/command', {action:'stop'}); } catch (e) {}
+  try { show('reply', await api('/api/arm/stop', {})); } catch (e) { show('reply', 'Stop error: ' + e.message); }
+}
+async function jog(joint, sign) {
+  if (!$('clear').checked) { show('reply', 'Tick "workcell clear" first.'); return; }
+  try { show('reply', await api('/api/arm/jog', {joint, delta_deg: sign * parseFloat(val('step')),
+        speed_deg_s: parseFloat(val('speed')), workcell_ready:true})); } catch (e) { show('reply', 'Jog error: ' + e.message); }
+}
+async function grip(action) {
+  if (action === 'grab' && !$('clear').checked) { show('reply', 'Tick "workcell clear" first.'); return; }
+  try { show('reply', await api('/api/gripper', {action})); } catch (e) { show('reply', 'Gripper error: ' + e.message); }
+}
+function snap() { $('cam').src = '/api/camera?t=' + Date.now(); }
+async function loadConfig() {
+  try { const c = await api('/api/config'); $('config').value = JSON.stringify(c.attributes, null, 2);
+        $('cfgnote').textContent = 'module version ' + c.version; } catch (e) { $('cfgnote').textContent = e.message; }
+}
+async function saveConfig(apply) {
+  let attributes; try { attributes = JSON.parse(val('config')); } catch (e) { $('cfgnote').textContent = 'Invalid JSON: ' + e.message; return; }
+  if (apply && !confirm('Replace code-2 attributes on the machine? code-2 will restart.')) return;
+  try { const r = await api('/api/config', {attributes, apply}); $('cfgnote').textContent = JSON.stringify(r); }
+  catch (e) { $('cfgnote').textContent = e.message; }
+}
+async function describe() {
+  try {
+    const d = await api('/api/command', {action:'describe'});
+    $('place').innerHTML = d.place.goals.map(g => `<option value="${g.name}">${g.name}${g.color ? ' (' + g.color + ')' : ''}</option>`).join('');
+    $('place').value = d.default_goal;
+  } catch (e) { /* older module without describe */ }
+}
+let names = ['J1','J2','J3','J4','J5','J6'];
+async function poll() {
+  try {
+    const s = await api('/api/state');
+    const c = s.code2 || {};
+    $('state').textContent = c.error && !c.state ? 'code-2 unreachable' : (c.busy ? 'busy: ' : '') + (c.state || '?') + (s.moving ? ' · arm moving' : '');
+    $('state').className = 'pill ' + (c.busy ? 'busy' : (c.error ? 'err' : ''));
+    $('stage').textContent = 'stage ' + (c.stage || '—');
+    const t = $('joints');
+    if (t.rows.length === 1) names.forEach((n, i) => { const r = t.insertRow(); r.innerHTML =
+      `<td>${n}</td><td id="j${i}"></td><td><button onclick="jog(${i},-1)">−</button> <button onclick="jog(${i},1)">+</button></td>`; });
+    s.joints_deg.forEach((v, i) => $('j' + i).textContent = v.toFixed(2));
+    const p = s.tcp_world; $('tcp').textContent = `TCP x ${p.x.toFixed(1)} y ${p.y.toFixed(1)} z ${p.z.toFixed(1)} mm`;
+    show('status', c);
+  } catch (e) { $('state').textContent = 'offline: ' + e.message; $('state').className = 'pill err'; }
+}
+setInterval(poll, 1500); setInterval(() => { if ($('live').checked) snap(); }, 1000);
+poll(); describe(); snap(); loadConfig();
+</script>
+</body>
+</html>
