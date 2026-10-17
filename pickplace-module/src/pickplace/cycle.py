@@ -24,7 +24,7 @@ from viam.proto.component.arm import JointPositions, MoveOptions
 
 from .kinematics import ArmKinematics
 from .memory import CubeMemory
-from .planning import Planner
+from .planning import Planner, allowed_contacts, carried_cube_violations, scene_world
 from .task import compute_targets
 from .transforms import pose_matrix
 from .vision_geometry import analyze, consensus_observation, decode_depth, native
@@ -546,6 +546,83 @@ class PickPlaceCycle:
         except BaseException:
             if touched:
                 self.memory.set('unknown', how='cycle stopped or failed after suction on; check the workcell')
+            await self.stop_arm()
+            raise
+        finally:
+            await self.release_lease()
+
+    async def _carried_segment(self, planner, start, world, **kw):
+        """A carried-cube segment that also passes the swept-cube wall/ceiling check."""
+        for _ in range(5):
+            path = await planner.segment(start, world, **kw)
+            if not carried_cube_violations(self.kin, path, self.targets['grasp']['tcp_in_cube'], self.s.cube_size_mm,
+                                           self.workcell, self.s.carry_clearance_mm/2):
+                return path
+        raise CycleError('Carried cube would come too close to the wall/ceiling on every plan')
+
+    async def hover_trial(self, goal, select='only', seconds=30.0):
+        """Placement check without placing. Pick the cube, carry it to above the goal (its bottom
+        clears the rim by box_entry_clearance_mm, or clearance_mm over the ring/table), hold there
+        `seconds` so a person can judge the offset, then carry it back and set it down exactly
+        where it was picked. Cube memory is unchanged when this completes."""
+        self.events = []
+        touched = False
+        await self.preflight()
+        await self.acquire_lease()
+        try:
+            await self.go_to_overview(Planner(self.motion, self.s, self.kin))
+            remembered = self.memory.pickable_source()
+            if remembered is None:
+                await self.detect(goal, select)
+            else:
+                self.event('using_remembered_cube', place=remembered['place'])
+                self.observation = await self.look_for_obstacles()
+            if remembered is not None and remembered['place'] == goal:
+                raise CycleError(f'The cube is already at {goal}')
+            plans = dict((name, (path, speed)) for name, path, speed in await self.plan(goal, source=remembered))
+            planner = Planner(self.motion, self.s, self.kin, self.workcell)
+            for name in ('approach', 'descend'):
+                await self.execute(name, *plans[name])
+            touched = True
+            await self.suction_on()
+            await self.execute('press', *plans['press'])
+            sealed = await self.wait_for_seal()
+            self.event('seal', attempt=1, sealed=sealed is not None, seconds=sealed)
+            if sealed is None:
+                await self.go_to_overview(planner)
+                touched = False  # nothing was lifted
+                raise CycleError('No seal on the cube; hover trial stopped before lifting')
+            await self.execute('lift', *plans['lift'])
+            if not await self.holding():
+                raise CycleError('The holding sensor lost the cube at the lift')
+            await self.execute('transfer', *plans['transfer'])
+            t = self.targets
+            info = {'goal': goal, 'release_target_xy_mm': [round(t['release']['x'], 1), round(t['release']['y'], 1)],
+                    'hover_tcp_z_mm': round(t['above_place']['z'], 1), 'place_yaw_deg': t['place_yaw_deg'], 'seconds': seconds}
+            self.event('hovering', **info)
+            await asyncio.sleep(seconds)
+            info['still_held'] = await self.holding()
+            self.event('hover_done', held=info['still_held'])
+            if not info['still_held']:
+                raise CycleError('The cube dropped while hovering')
+            carried = scene_world(self.s, self.observation, t, 'carried', goal, self.workcell)
+            back = await self._carried_segment(planner, await self.joints(), carried, goal_deg=t['q_above_pick'])
+            await self.execute('return_to_pick', back, self.s.travel_speed_deg_s)
+            down = await self._carried_segment(planner, await self.joints(), carried, pose=t['contact'], straight=True,
+                                               allow=allowed_contacts(self.s, 'pickup', goal, t['source_place']))
+            await self.execute('set_down', down, self.s.approach_speed_deg_s)
+            await self.suction_off()
+            touched = False
+            at_pick = scene_world(self.s, self.observation, t, 'at_pick', goal, self.workcell)
+            up = await planner.segment(await self.joints(), at_pick, pose=t['above_pick'], straight=True,
+                                       allow=allowed_contacts(self.s, 'pickup', goal, t['source_place']))
+            await self.execute('retract', up, self.s.approach_speed_deg_s)
+            await self.go_to_overview(planner)
+            self.event('complete', goal=goal, hover_trial=True)
+            return {'hover': info, 'seal_seconds': sealed, 'cube_location': copy.deepcopy(self.memory.location)}
+        except BaseException:
+            if touched:
+                self.memory.set('unknown', how='hover trial stopped with the cube gripped; check the workcell')
             await self.stop_arm()
             raise
         finally:
