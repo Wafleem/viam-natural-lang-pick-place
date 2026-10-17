@@ -38,8 +38,36 @@ def prism(label, xyz, dims, yaw=0.0):
                     box=RectangularPrism(dims_mm=Vector3(x=float(dims[0]), y=float(dims[1]), z=float(dims[2]))))
 
 
-def scene_world(settings, observation, targets, cube_state, goal):
-    """WorldState with the cube (static or carried), ring, local table patch and every box."""
+def workcell_prisms(workcell, inflate=0.0):
+    """[(frame, center_xyz, dims, yaw_deg)] -> obstacle geometries (labels scene-<frame>), grown by
+    `inflate` mm on every side so the planner itself keeps that clearance."""
+    return [prism('scene-'+name, xyz, [d+2*inflate for d in dims], yaw) for name, xyz, dims, yaw in workcell]
+
+
+def carried_cube_violations(kin, path, tcp_in_cube, size, workcell, clearance, steps=12):
+    """Sweep the carried cube along a joint path (linear joint interpolation, as executed) and
+    return [(obstacle, min signed gap mm)] for every workcell box it comes within `clearance` of."""
+    cube_from_tool = np.linalg.inv(np.asarray(tcp_in_cube, float))
+    h = size/2
+    pts = np.array([[x, y, z, 1.0] for x in (-h, 0, h) for y in (-h, 0, h) for z in (0, -size/2, -size)])
+    worst = {}
+    for a, b in zip(path[:-1], path[1:]):
+        for t in np.linspace(0, 1, steps):
+            q = [x+(y-x)*t for x, y in zip(a, b)]
+            world = (kin.fk(q) @ cube_from_tool @ pts.T).T[:, :3]
+            for name, xyz, dims, yaw in workcell:
+                c, sn = math.cos(math.radians(yaw)), math.sin(math.radians(yaw))
+                d = world-np.asarray(xyz, float)
+                local = np.c_[d[:, 0]*c+d[:, 1]*sn, -d[:, 0]*sn+d[:, 1]*c, d[:, 2]]
+                gap = float(np.min(np.max(np.abs(local)-np.asarray(dims)/2, axis=1)))  # <0: inside
+                if gap < clearance:
+                    worst[name] = min(gap, worst.get(name, gap))
+    return sorted(worst.items())
+
+
+def scene_world(settings, observation, targets, cube_state, goal, workcell=()):
+    """WorldState with the cube (static or carried), ring, local table patch, every box and the
+    machine's wall/ceiling (workcell: live poses, see cycle.workcell_scene)."""
     s, size = settings, settings.cube_size_mm
     cube_top, goal_top = np.array(targets['cube_top_world_mm']), np.array(targets['goal_top_world_mm'])
     source = targets.get('source_place', 'table')
@@ -66,6 +94,7 @@ def scene_world(settings, observation, targets, cube_state, goal):
         obstacles.extend(ring_prisms(xy, top-h/2, d, h))
     obstacles.extend(box_obstacles(s))
     obstacles.extend(other_cubes(s, observation))
+    obstacles.extend(workcell_prisms(workcell, s.carry_clearance_mm))
     if cube_state == 'carried':
         # Tool Z points down into the cube. The cup sits press_depth_mm inside the top
         # face, so the cube spans [-press, size] along tool Z (conservative both ways).
@@ -136,8 +165,8 @@ class PlanError(RuntimeError):
 
 
 class Planner:
-    def __init__(self, motion, settings, kinematics):
-        self.motion, self.settings, self.kin = motion, settings, kinematics
+    def __init__(self, motion, settings, kinematics, workcell=()):
+        self.motion, self.settings, self.kin, self.workcell = motion, settings, kinematics, list(workcell)
 
     async def segment(self, start_deg, world, goal_deg=None, pose=None, straight=False, allow=(), margin=None):
         s = self.settings
@@ -205,12 +234,22 @@ class Planner:
                         'retract': ('pose', targets['above_place']), 'return': ('joint', s.overview_joints_deg)}
         plans, start = [], list(start_deg)
         for name, kind, speed, cube_state, contacts in STAGES:
-            world = scene_world(s, observation, targets, cube_state, goal)
+            world = scene_world(s, observation, targets, cube_state, goal, self.workcell)
             what, value = destinations[name]
             try:
-                path = await self.segment(start, world, goal_deg=value if what == 'joint' else None,
-                                          pose=value if what == 'pose' else None, straight=kind == 'straight',
-                                          allow=allowed_contacts(s, contacts, goal, targets.get('source_place', 'table')))
+                for attempt in range(5):
+                    path = await self.segment(start, world, goal_deg=value if what == 'joint' else None,
+                                              pose=value if what == 'pose' else None, straight=kind == 'straight',
+                                              allow=allowed_contacts(s, contacts, goal, targets.get('source_place', 'table')))
+                    # The carried cube is part of the arm: its swept volume must clear the wall
+                    # and ceiling with margin. The planner is sampling-based, so re-plan if not.
+                    bad = carried_cube_violations(self.kin, path, targets['grasp']['tcp_in_cube'], s.cube_size_mm,
+                                                  self.workcell, s.carry_clearance_mm/2) if cube_state == 'carried' else []
+                    if not bad:
+                        break
+                else:
+                    raise PlanError('carried cube comes within '+f'{s.carry_clearance_mm/2:g} mm of '+', '.join(f'{n} (gap {g:.0f} mm)' for n, g in bad)
+                                    +' on every attempt; raise the ceiling or move the goal away from the wall')
             except Exception as e:
                 hint = ''
                 if 'violation between' in str(e):
