@@ -1,0 +1,37 @@
+name: tests
+on:
+  push:
+  pull_request:
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install -r pickplace-module/requirements.txt -r pickplace-module/requirements-dev.txt -r dashboard/requirements.txt
+      - name: Module tests
+        working-directory: pickplace-module
+        run: python -m pytest -q
+      - name: Parser and dashboard tests
+        run: python -m pytest -q nl-integration dashboard
+
+  web:
+    runs-on: ubuntu-latest
+    if: ${{ hashFiles('code3-web/natural-language-ui/package.json') != '' }}
+    defaults:
+      run:
+        working-directory: code3-web/natural-language-ui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci
+      - run: node build.mjs
+      - run: node --test test/*.test.mjs
