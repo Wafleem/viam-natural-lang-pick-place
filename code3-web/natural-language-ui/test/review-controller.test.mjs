@@ -7,7 +7,7 @@ import { CODE2_REFERENCE } from '../src/code2-contract.js';
 const TEXT = 'Move the cube to the ring';
 const intent = () => parseIntent(TEXT).intent;
 const status = (extra = {}) => ({ implementation: CODE2_REFERENCE.implementation,
-  calibrated: true, busy: false, state: 'idle', request_id: '', available_goals: ['ring', 'box'], ...extra });
+  calibrated: true, busy: false, state: 'idle', request_id: '', available_goals: ['ring', 'box'], goal_details: [{ name: 'ring', type: 'ring' }, { name: 'box', type: 'box', color: 'orange' }], ...extra });
 const deferred = () => {
   let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
   return { promise, resolve, reject };
@@ -39,11 +39,11 @@ test('only exact supported intent matching its text can be reviewed; caller muta
   const original = intent(); c.review(original, TEXT); original.source_selector.kind = 'box';
   assert.equal(c.state.review.intent.source_selector.kind, 'cube');
   assert.throws(() => { c.state.review.intent.source_selector.color = 'white'; }, TypeError);
-  for (const text of ['Move white cube to ring', 'Move cube on right to ring', 'Put cube on the box', 'Move cube to ring with pink paper']) {
+  for (const text of ['Move red cube to ring', 'Move cube to ring on the right', 'Put cube on the box', 'Move cube to ring with pink paper']) {
     assert.equal(c.review(parseIntent(text).intent, text), false); assert.equal(c.acknowledge(true), false);
     assert.equal((await c.send()).sent, false);
   }
-  assert.equal(c.review(intent(), 'Move white cube to ring'), false);
+  assert.equal(c.review(intent(), 'Move red cube to ring'), false);
   assert.equal(c.review({ ...intent(), repeat: 2 }, TEXT), false);
 });
 
@@ -53,7 +53,7 @@ test('status must match implementation, booleans and known safe state; freshness
     { state: 'running', busy: false }]) {
     const f = fixture(); f.reply(status(bad)); await f.ready();
     assert.equal(f.controller.canSend, false, JSON.stringify(bad));
-    assert.equal((await f.controller.send()).sent, false); assert.equal(f.calls.filter(c => c.action === 'start').length, 0);
+    assert.equal((await f.controller.send()).sent, false); assert.equal(f.calls.filter(c => c.action === 'pick_place').length, 0);
   }
   const f = fixture(); await f.ready();
   f.time(10000 + STATUS_MAX_AGE_MS); assert.equal(f.controller.canSend, true);
@@ -81,27 +81,27 @@ test('explicit send consumes review before await, creates only exact start paylo
   const c = f.controller, sending = c.send();
   assert.equal(c.state.review.consumed, true); assert.equal(c.state.request.phase, 'sending');
   assert.equal((await c.send()).sent, false);
-  assert.deepEqual(f.calls.at(-1), { action: 'start', goal: 'ring', request_id: 'request-1', workcell_ready: true });
+  assert.deepEqual(f.calls.at(-1), { action: 'pick_place', pick: { object: 'cube', select: 'only' }, place: { type: 'ring' }, request_id: 'request-1', workcell_ready: true });
   assert.deepEqual(f.journal[0], { request_id: 'request-1', phase: 'unknown' });
   pending.resolve({ accepted: true, request_id: 'request-1', state: 'complete', busy: false }); await sending;
   assert.equal(c.state.request.phase, 'accepted'); assert.equal(c.state.request.resolved, false);
-  assert.equal(f.calls.filter(x => x.action === 'start').length, 1);
+  assert.equal(f.calls.filter(x => x.action === 'pick_place').length, 1);
 });
 
-test('cube-into-box sends box_once, but only while code-2 reports its box workflow enabled', async () => {
-  const BOX = 'Put the cube into the box';
-  const boxFixture = async extra => {
+test('cube-into-box sends pick_place only while a matching box is configured', async () => {
+  const fixtureFor = async (text, extra) => {
     const f = fixture(); f.reply(status(extra)); f.controller.attach(f.transport); await f.controller.refresh();
-    assert.equal(f.controller.review(parseIntent(BOX).intent, BOX), true); f.controller.acknowledge(true); return f;
+    assert.equal(f.controller.review(parseIntent(text).intent, text), true); f.controller.acknowledge(true); return f;
   };
-  let f = await boxFixture({});
-  assert.equal(f.controller.state.blockedReason, 'box_disabled');
-  assert.equal((await f.controller.send()).sent, false); assert.equal(f.calls.filter(x => x.action === 'start').length, 0);
-  f = await boxFixture({ surveyed_box_enabled: true, available_goals: ['ring'] });
+  let f = await fixtureFor('Put the cube into the blue box', {});
   assert.equal(f.controller.state.blockedReason, 'goal_unavailable');
-  f = await boxFixture({ surveyed_box_enabled: true });
+  assert.equal((await f.controller.send()).sent, false); assert.equal(f.calls.filter(x => x.action === 'pick_place').length, 0);
+  f = await fixtureFor('Put the cube into the box', { goal_details: [{ name: 'ring', type: 'ring' }] });
+  assert.equal(f.controller.state.blockedReason, 'goal_unavailable');
+  f = await fixtureFor('Put the cube into the orange box', {});
   assert.equal(f.controller.canSend, true); await f.controller.send();
-  assert.deepEqual(f.calls.at(-1), { action: 'box_once', request_id: 'request-1', workcell_ready: true });
+  assert.deepEqual(f.calls.at(-1), { action: 'pick_place', pick: { object: 'cube', select: 'only' }, place: { color: 'orange' },
+    request_id: 'request-1', workcell_ready: true });
 });
 
 test('an old status read cannot overwrite state after dispatch; a new status read can run', async () => {
@@ -178,7 +178,7 @@ test('journal is written before transport; journal failure or asynchronous write
   for (const savePending of [() => { throw new Error('storage denied'); }, () => false, async () => {}]) {
     const f = fixture({ savePending }); await f.ready();
     assert.equal((await f.controller.send()).reason, 'journal_unavailable');
-    assert.equal(f.calls.filter(x => x.action === 'start').length, 0);
+    assert.equal(f.calls.filter(x => x.action === 'pick_place').length, 0);
   }
   const order = [], f = fixture({ savePending: record => order.push(record ? 'journal' : 'clear') });
   await f.ready(); f.sendReply(command => { order.push('dispatch'); return { accepted: true, request_id: command.request_id }; });
@@ -205,10 +205,10 @@ test('journal clearing failures keep sends blocked even after known completion',
 test('synchronous callbacks cannot change the reviewed text/connection during UUID or dispatch notification', async () => {
   let c;
   const f = fixture({ uuid: () => { c.setInstruction('Move white cube to ring'); return 'id'; } }); c = f.controller; await f.ready();
-  assert.equal((await c.send()).sent, false); assert.equal(f.calls.filter(x => x.action === 'start').length, 0);
+  assert.equal((await c.send()).sent, false); assert.equal(f.calls.filter(x => x.action === 'pick_place').length, 0);
   let second;
   const g = fixture({ changed: state => { if (state.request?.phase === 'sending') second.detach(); } }); second = g.controller; await g.ready();
-  assert.equal((await second.send()).sent, false); assert.equal(g.calls.filter(x => x.action === 'start').length, 0);
+  assert.equal((await second.send()).sent, false); assert.equal(g.calls.filter(x => x.action === 'pick_place').length, 0);
   assert.equal(second.state.request.phase, 'not_sent'); assert.equal(second.state.request.resolved, true);
 });
 

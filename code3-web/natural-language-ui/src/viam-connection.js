@@ -36,17 +36,23 @@ function validateCredentials({ host, keyId, apiKey }) {
   return { host, keyId: keyId.trim(), apiKey };
 }
 
+const sortedKeys = value => value && typeof value === 'object' && !Array.isArray(value) ? Object.keys(value).sort().join(',') : null;
+const validPlace = place => {
+  const keys = sortedKeys(place);
+  return (keys === 'type' && ['ring', 'box'].includes(place.type))
+    || (keys === 'color' && typeof place.color === 'string' && /^[a-z]{3,12}$/.test(place.color));
+};
+
 function validateCommand(command) {
-  const keys = command && typeof command === 'object' && !Array.isArray(command) ? Object.keys(command).sort() : [];
-  if (keys.length === 1 && command.action === 'status') return;
-  const reviewedId = typeof command.request_id === 'string'
+  const keys = sortedKeys(command);
+  if (keys === 'action' && command.action === 'status') return;
+  const reviewedId = typeof command?.request_id === 'string'
     && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(command.request_id);
-  if (keys.join(',') === 'action,request_id,workcell_ready' && command.action === 'box_once'
-    && command.workcell_ready === true && reviewedId) return;
-  if (keys.join(',') === 'action,goal,request_id,workcell_ready' && command.action === 'start'
-    && ['ring', 'box'].includes(command.goal) && command.workcell_ready === true && typeof command.request_id === 'string'
-    && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(command.request_id)) return;
-  throw new Error('Only status or one reviewed cube-to-ring start or cube-to-box box_once command can use this connection.');
+  if (keys === 'action,pick,place,request_id,workcell_ready' && command.action === 'pick_place'
+    && command.workcell_ready === true && reviewedId
+    && sortedKeys(command.pick) === 'object,select' && command.pick.object === 'cube'
+    && ['only', 'left', 'right'].includes(command.pick.select) && validPlace(command.place)) return;
+  throw new Error('Only status or one reviewed pick_place command can use this connection.');
 }
 
 export async function createViamConnection(options, {

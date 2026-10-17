@@ -21,7 +21,7 @@ test('connect authenticates once, targets code-2 service and makes no implicit c
   assert.deepEqual(fake.config.credentials, { type: 'api-key', authEntity: 'fixture-id', payload: 'fixture-secret' });
   assert.equal(fake.config.noReconnect, true); assert.equal(fake.config.disableSessions, undefined);
   await connection.command({ action: 'status' });
-  const payload = { action: 'start', goal: 'ring', request_id: '91cb63f3-066d-41f7-9a5a-95772f20e089', workcell_ready: true };
+  const payload = { action: 'pick_place', pick: { object: 'cube', select: 'only' }, place: { type: 'ring' }, request_id: '91cb63f3-066d-41f7-9a5a-95772f20e089', workcell_ready: true };
   await connection.command(payload);
   assert.deepEqual(fake.calls, [{ payload: { action: 'status' }, callOptions: { timeoutMs: 15000 } },
     { payload, callOptions: { timeoutMs: 15000 } }]);
@@ -88,7 +88,7 @@ test('real pinned SDK serializes the reviewed command through the service API wi
   const connection = await createViamConnection(options, { loadSdk: async () => ({
     async createRobotClient() { return machine; }, GenericServiceClient,
   }) });
-  const payload = { action: 'start', goal: 'ring', request_id: '91cb63f3-066d-41f7-9a5a-95772f20e089', workcell_ready: true };
+  const payload = { action: 'pick_place', pick: { object: 'cube', select: 'only' }, place: { type: 'ring' }, request_id: '91cb63f3-066d-41f7-9a5a-95772f20e089', workcell_ready: true };
   assert.deepEqual(await connection.command(payload), { accepted: true, request_id: payload.request_id });
   assert.deepEqual(calls, [{ name: 'code-2', command: payload, callOptions: { timeoutMs: 15000 } }]);
 });
