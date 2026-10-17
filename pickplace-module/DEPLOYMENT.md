@@ -33,11 +33,13 @@ The last 0.0.24 run left the arm stopped at the failed lift. The latest read sho
 
 Steps, at the robot:
 
-1. Make sure nobody is in the workcell. Release the e-stop.
-2. Clear the controller error (xArm Studio: *Clear Error* → *Enable*; or the UFactory app).
-3. After deploying (step 3), send `{"action":"recover_limits","workcell_ready":true}`.
-   This switches suction off and rolls **only J4** back to 355° at 2°/s. The tool can shift by
-   ~15 mm. If any joint is more than 6° past its limit, the command refuses; jog the arm by hand.
+1. Make sure nobody is in the workcell. Release the e-stop (it latches; this can't be done remotely).
+2. From here everything can be done remotely. In the dashboard's *xArm controller* panel, press
+   `clear_error`. That is the `viam:ufactory` driver's `{"clear_error": true}` arm DoCommand. xArm
+   Studio's *Clear Error* → *Enable* works too.
+3. Send `{"action":"recover_limits","workcell_ready":true}`. It clears the error again, switches
+   suction off and rolls **only J4** back to 355° at 2°/s. The tool can shift by ~15 mm. If any joint
+   is more than 6° past its limit, the command refuses; jog the arm by hand.
 4. Send `{"action":"reset","workcell_ready":true}`. The arm retreats straight up, then goes to the
    calibrated overview.
 
@@ -168,6 +170,9 @@ Keep the physical e-stop in reach. The software `stop` is not an e-stop.
 | `suction_dwell_s` / `release_dwell_s` | 1.0 | 0–10 |
 | `travel_speed_deg_s` / `approach_speed_deg_s` / `press_speed_deg_s` | 10 / 3 / 2 | 0.5–20 / 0.5–10 / 0.2–5 |
 | `joint_limit_margin_deg` | 5 | 1–30 |
+| `clearance_mm` | 100 | 30–300: approach height above the cube / ring contact |
+| `box_entry_clearance_mm` | 30 | 10–200: carried cube bottom above a box rim before entering |
+| `release_above_goal_mm` | 0 | 0–50: release this far above the seated height |
 | `default_goal` | from config | `ring` or a box name |
 | `lease_service` | `code-1` | `""` disables the lease |
 
@@ -194,22 +199,36 @@ Goals are `ring` plus one goal per entry in the `boxes` list. The older single `
 The cube needs a few mm of clearance per side (it is placed with no padding). The carry height
 clears the tallest configured rim.
 
+After `return`, the cycle checks the pick spot with the camera, since there's no usable suction
+feedback. `last_result.outcome.cube_left_pick_spot` is `false` when the cube is still there.
+
 The xArm's collision sensitivity is 3. If the controller reports a collision during `press`, lower the
 sensitivity in xArm Studio, or reduce `press_depth_mm`/`press_speed_deg_s`.
 
 ## 5. What has and has not been verified
 
-Verified, without motion (Oct 16, 2026, evening):
-- 26 offline tests pass.
+Verified without motion (night of Oct 16–17, 2026):
+- 48 offline tests pass (pickplace-module), plus 11 parser tests (nl-integration).
 - FK from the live URDF matches the live frame system to 1e-6 mm.
-- Live motion planner: every stage of a cube → box cycle plans from the overview. J4 stays at
-  0–188°, versus 360° in 0.0.24.
+- Live motion planner: every stage of a cube → box cycle plans from the overview. The wrist stays
+  on the taught branch (J4 180–191.5°) like the operator-taught cycle; 0.0.24 drove J4 to 360°.
 - Live motion planner: cube → ring plans with the ring at (440, 130).
-- The module process starts and serves locally. Version preview against the live config works.
+- Deployed on armfarm19 (0.0.26–0.0.29, cloud builds Done): `status`, `describe` and `self_test`
+  run on the robot. self_test passes kinematics, camera (intrinsics match calibration) and lease.
+  The reset plan is correctly blocked until `recover_limits`, because J4 sits at 360.0008°.
 
 Not verified:
-- Any physical execution of this module.
+- Any physical execution of this module (the e-stop has been latched the whole time).
 - Whether a 10 mm press with open-loop suction holds the cube through transfer.
 - Whether the controller tolerates the press at collision sensitivity 3.
 - The camera/overview calibration and the accepted box pose. These are unchanged from 0.0.24 and
   only as good as before.
+
+Worth checking with someone on site:
+- **Vacuum feedback wiring.** `Vgripper` has no `connection_type`, so the driver assumes
+  `contact` wiring on this arm (hardware ≥1305). If the cup is the older plug-in type, the holding
+  signal is read from the wrong inputs. With a cube sealed, compare the dashboard's
+  *contact* / *plugin* vacuum readings. code-2 does not depend on this either way.
+- **Front wall obstacle.** A fragment override moves `wall-front` from 740 to 650 mm. It's what
+  rules out ring positions near x ≈ 530. If the real wall is farther out, that override is too
+  conservative.
