@@ -231,8 +231,8 @@ class PickPlaceCycle:
     async def sweep_for_cube(self, goal, select='only'):
         """Pan the camera (base joint) to nearby views until the cube is fully seen.
 
-        Positions from a sweep view are anchored on the ring: its overview position is known, so
-        (ring at overview) - (ring seen from this view) corrects everything seen from this view.
+        A sweep view is the overview camera translated sideways (same orientation and height),
+        so the overview calibration applies in camera terms: tool = cal(raw - shift) + shift.
         The arm returns to the overview before planning; the observation is expressed as if seen
         from there, so the rest of the cycle is unchanged.
         """
@@ -241,12 +241,6 @@ class PickPlaceCycle:
         from viam.proto.common import GeometriesInFrame, WorldState
         cal, s = self.s.calibration, self.s
         ref = await self.capture(require_ring=False, require_cube=False)
-        if 'ring' in ref:
-            ring_ref = calibrated_xy(cal, ref['ring']['top_center_world_mm'])
-        elif s.ring_spot:
-            ring_ref = np.array(s.ring_spot['xy_mm'])
-        else:
-            raise CycleError('Cube not in the overview view, and no ring to anchor a camera sweep')
         planner = Planner(self.motion, s, self.kin)
         world = WorldState(obstacles=[GeometriesInFrame(reference_frame='world', geometries=[
             prism('scan-objects-envelope', [400, 0, 125], [600, 800, 350])]+box_obstacles(s))])
@@ -269,21 +263,25 @@ class PickPlaceCycle:
                 await self.execute(f'sweep_{off[0]:+g}_{off[1]:+g}', path, s.sweep_speed_deg_s)
                 await asyncio.sleep(.6)
                 hits = []
+                cam_shift = np.array(pose_matrix(await self.pose(s.camera, 'world')))[:2, 3]-np.array(pose_matrix(cal['camera_pose_world']))[:2, 3]
+                # A sweep view is the overview camera translated (same orientation), so a point seen
+                # here maps to tool XY like the same pixel/depth at the overview, plus the shift:
+                # tool = cal(raw - shift) + shift = calibrated_xy(raw) + (I - R) shift.
+                # (The old ring anchor measured its correction at ring height and applied it
+                # 170 mm higher at the cube top; with a ~20 deg camera tilt that was ~20 mm off.)
+                corr = cam_shift-to_raw.T @ cam_shift
                 for _ in range(4):
                     obs = await self.capture(require_ring=False, select=select, require_cube=False)
                     issues = [i for i in obs.get('issues', []) if not i.startswith('Depth/world tabletop')]
-                    if issues or 'cube' not in obs or 'ring' not in obs:
+                    if issues or 'cube' not in obs:
                         continue
-                    corr = ring_ref-calibrated_xy(cal, obs['ring']['top_center_world_mm'])
-                    # Height: the ring rests on the calibrated table too, so it also anchors z.
-                    dz = cal['observed_ring_z_mm']-obs['ring']['top_center_world_mm'][2]
-                    cube_z = obs['cube']['top_center_world_mm'][2]+dz
+                    cube_z = obs['cube']['top_center_world_mm'][2]  # same camera height as the overview
                     if abs(cube_z-cal['observed_cube_z_mm']) > 12:
                         self.event('sweep_frame_rejected', reason=f'cube top {cube_z-cal["observed_cube_z_mm"]:+.0f} mm from the calibrated table height')
                         continue
                     hits.append((calibrated_xy(cal, obs['cube']['top_center_world_mm'])+corr, obs['cube']['world_yaw_deg']+g, obs['cube'], corr, cube_z))
                     await asyncio.sleep(.1)
-                tried.append({'shift_mm': off, 'frames_with_cube_and_ring': len(hits)})
+                tried.append({'shift_mm': off, 'frames_with_cube': len(hits)})
                 if len(hits) >= 3:
                     xy = np.median([h[0] for h in hits], axis=0)
                     yaws = np.array([h[1] for h in hits])
@@ -307,7 +305,7 @@ class PickPlaceCycle:
         cube = {**cube, 'top_center_world_mm': [float(raw[0]), float(raw[1]), cube_z],
                 'world_yaw_deg': float((yaw-g+45) % 90-45)}
         obs['cube'], obs['cubes'] = cube, [cube]
-        obs['sweep'] = {'shift_mm': off, 'ring_anchor_correction_mm': [float(c) for c in corr], 'cube_tool_xy_mm': [float(v) for v in xy]}
+        obs['sweep'] = {'shift_mm': off, 'shift_correction_mm': [float(c) for c in corr], 'cube_tool_xy_mm': [float(v) for v in xy]}
         self.observation = native(obs)
         self.event('cube_found_by_sweep', shift_mm=off, xy=[round(float(v), 1) for v in xy])
         return self.observation
