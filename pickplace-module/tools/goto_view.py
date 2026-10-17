@@ -34,13 +34,19 @@ VIEWS = {
 
 async def main(args):
     s = Settings.from_attributes(json.loads(Path(args.config).read_text()))
-    target = s.overview_joints_deg if args.view == 'overview' else VIEWS[args.view]
+    target = list(s.overview_joints_deg) if args.view == 'overview' else VIEWS[args.view]
+    shift = [args.dx, args.dy]
     async with connect() as robot:
         if (await Generic.from_robot(robot, 'code-2').do_command({'action': 'status'})).get('busy'):
             raise SystemExit('code-2 is busy')
         cycle = PickPlaceCycle(s, Arm.from_robot(robot, 'arm'), Gripper.from_robot(robot, 'Vgripper'), Camera.from_robot(robot, 'cam'),
                                MotionClient.from_robot(robot, 'builtin'), Generic.from_robot(robot, 'code-1'), log=print)
         await cycle.preflight()
+        if any(shift):
+            T = cycle.kin.fk(s.overview_joints_deg)
+            T[0, 3] += shift[0]
+            T[1, 3] += shift[1]
+            target = cycle.kin.ik(T, s.overview_joints_deg, 3.0)
         await cycle.acquire_lease()
         try:
             start = await cycle.joints()
@@ -74,6 +80,8 @@ if __name__ == '__main__':
     p = argparse.ArgumentParser()
     p.add_argument('view', choices=['overview', *VIEWS])
     p.add_argument('--save')
+    p.add_argument('--dx', type=float, default=0.0, help='overview camera shifted by this many mm in x')
+    p.add_argument('--dy', type=float, default=0.0, help='... and in y (same height and orientation)')
     p.add_argument('--speed', type=float, default=12.0, help='deg/s for this camera-only move (<= 20)')
     p.add_argument('--config', default=str(ROOT/'config'/'code2-attributes.json'))
     asyncio.run(main(p.parse_args()))

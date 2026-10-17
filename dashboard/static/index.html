@@ -411,7 +411,7 @@ async function placeCube(goal) {
   if (['ring', 'box'].includes(loc.place) && loc.place !== goal) {
     await step(`pick_place ${loc.place} → ${goal} (remembered grip)`, go('pick_place', {place:{goal}}));
   } else {
-    await step(`dry_run → ${goal}`, still('dry_run', {pick:{object:'cube', select:'only'}, place:{goal}}));
+    await step(`dry_run → ${goal} (sweeps if needed)`, still('dry_run', {pick:{object:'cube', select:'only'}, place:{goal}, workcell_ready:true}));
     await step(`pick_place → ${goal}`, go('pick_place', {pick:{object:'cube', select:'only'}, place:{goal}}));
   }
   const s = await api('/api/command', {action:'status'}), o = (s.last_result || {}).outcome;

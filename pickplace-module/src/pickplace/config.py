@@ -48,8 +48,9 @@ class Settings:
     release_dwell_s: float = 1.0
     clearance_mm: float = 100.0
     box_entry_clearance_mm: float = 30.0
-    # Camera sweep when the cube is not fully seen from the overview: base-joint pans (deg) and speed.
-    sweep_j1_offsets_deg: list = field(default_factory=lambda: [8.0, -8.0, 16.0, -16.0])
+    # Camera sweep when the cube is not fully seen from the overview: sideways shifts (dx, dy mm)
+    # of the overview camera at the same height and orientation, and the sweep speed.
+    sweep_offsets_mm: list = field(default_factory=lambda: [[0.0, 120.0], [0.0, 240.0], [0.0, 330.0], [0.0, -120.0], [100.0, 0.0]])
     sweep_speed_deg_s: float = 15.0
     release_above_goal_mm: float = 0.0
     grasp_toward_image_top_mm: float = 0.0
@@ -99,7 +100,7 @@ class Settings:
             clearance_mm=_number(attrs, 'clearance_mm', 100, 30, 300),
             box_entry_clearance_mm=_number(attrs, 'box_entry_clearance_mm', 30, 10, 200),
             release_above_goal_mm=_number(attrs, 'release_above_goal_mm', 0, 0, 50),
-            sweep_j1_offsets_deg=_offsets(attrs.get('sweep_j1_offsets_deg', [8, -8, 16, -16])),
+            sweep_offsets_mm=_offsets(attrs.get('sweep_offsets_mm', [[0, 120], [0, 240], [0, 330], [0, -120], [100, 0]])),
             sweep_speed_deg_s=_number(attrs, 'sweep_speed_deg_s', 15, 1, 20),
             grasp_toward_image_top_mm=_number(attrs, 'grasp_toward_image_top_mm', 0, 0, 20),
             placement_correction_world_xy_mm=[float(v) for v in correction],
@@ -166,9 +167,11 @@ def _home(raw):
 
 
 def _offsets(raw):
-    if not isinstance(raw, list) or len(raw) > 8 or any(isinstance(v, bool) or not isinstance(v, (int, float)) or abs(v) > 40 for v in raw):
-        raise ValueError('sweep_j1_offsets_deg: up to 8 base-joint offsets within +/-40 deg')
-    return [float(v) for v in raw]
+    ok = isinstance(raw, list) and len(raw) <= 8 and all(
+        isinstance(p, list) and len(p) == 2 and all(isinstance(v, (int, float)) and not isinstance(v, bool) and abs(v) <= 400 for v in p) for p in raw)
+    if not ok:
+        raise ValueError('sweep_offsets_mm: up to 8 [dx, dy] camera shifts within +/-400 mm')
+    return [[float(v) for v in p] for p in raw]
 
 
 def _ring(raw):
