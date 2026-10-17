@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "armfarm19/code-2/command",
+  "title": "code-2 DoCommand",
+  "description": "Send with any Viam SDK: GenericService 'code-2' DoCommand. Get live goals and selectors from {\"action\":\"describe\"}. Commands that move need workcell_ready: true, set only after a person confirms the workcell is clear. Long commands return immediately; poll {\"action\":\"status\"} until busy is false.",
+  "oneOf": [
+    {
+      "title": "pick_place / dry_run",
+      "type": "object",
+      "required": ["action", "place"],
+      "properties": {
+        "action": {"enum": ["pick_place", "dry_run"]},
+        "pick": {
+          "type": "object",
+          "properties": {
+            "object": {"const": "cube"},
+            "select": {
+              "oneOf": [
+                {"enum": ["only", "left", "right", "nearest", "farthest"]},
+                {"type": "object", "required": ["index"], "properties": {"index": {"type": "integer", "minimum": 0}}}
+              ],
+              "description": "left/right as seen by the overview camera; index counts cubes left to right; only = exactly one cube must be visible"
+            }
+          }
+        },
+        "place": {
+          "oneOf": [
+            {"type": "string", "description": "goal name: ring or a configured box name"},
+            {"type": "object", "required": ["goal"], "properties": {"goal": {"type": "string"}}},
+            {"type": "object", "required": ["type"], "properties": {"type": {"enum": ["ring", "box"]}}},
+            {"type": "object", "required": ["color"], "properties": {"color": {"type": "string"}}}
+          ]
+        },
+        "workcell_ready": {"type": "boolean", "description": "required true for pick_place"},
+        "request_id": {"type": "string", "maxLength": 80, "description": "unique per attempt; a repeat is ignored"}
+      }
+    },
+    {
+      "title": "simple commands",
+      "type": "object",
+      "required": ["action"],
+      "properties": {
+        "action": {"enum": ["describe", "status", "self_test", "release", "stop", "reset", "recover_limits", "measure_box"]},
+        "name": {"type": "string", "description": "measure_box: name for the new box"},
+        "workcell_ready": {"type": "boolean", "description": "required true for reset and recover_limits"}
+      }
+    }
+  ]
+}

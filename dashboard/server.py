@@ -31,6 +31,9 @@ sys.path[:0] = [str(MODULE/'tools'), str(MODULE/'src')]
 from connect import app_client, connect  # noqa: E402
 from pickplace.config import Settings  # noqa: E402
 
+sys.path.insert(0, str(ROOT/'nl-integration'))
+from nl_to_command import DESCRIBE, parse, validate  # noqa: E402
+
 PART_ID = 'f5c74a65-a023-4983-a317-1e9a88c88372'
 SERVICE = 'code-2'
 MAX_JOG_DEG, MAX_JOG_SPEED = 10.0, 5.0
@@ -128,6 +131,21 @@ async def command(request):
         return ok(await call(lambda r: code2(r, body)))
     except Exception as e:
         return fail(f'{type(e).__name__}: {e}')
+
+
+async def nl(request):
+    """Plain language -> command preview (nothing is sent; the page sends it after review)."""
+    body = await request.json()
+    try:
+        describe = await call(lambda r: code2(r, {'action': 'describe'}))
+    except Exception:
+        describe = DESCRIBE
+    try:
+        result = parse(str(body.get('text', '')), describe)
+        validate(result['command'], describe)
+        return ok(result)
+    except Exception as e:
+        return fail(str(e))
 
 
 async def camera(_):
@@ -229,7 +247,7 @@ def main():
     p.add_argument('--port', type=int, default=8765)
     args = p.parse_args()
     app = web.Application()
-    app.add_routes([web.get('/', index), web.get('/api/state', state), web.post('/api/command', command),
+    app.add_routes([web.get('/', index), web.get('/api/state', state), web.post('/api/command', command), web.post('/api/nl', nl),
                     web.get('/api/camera', camera), web.post('/api/arm/jog', jog), web.post('/api/arm/stop', arm_stop),
                     web.post('/api/gripper', gripper), web.get('/api/config', get_config), web.post('/api/config', put_config)])
     app.on_cleanup.append(lambda _: ROBOT.drop())

@@ -70,6 +70,13 @@
   </section>
 
   <section>
+    <h2>Say it (plain language → command)</h2>
+    <div class="row"><input type="text" id="nltext" style="flex:1" value="can you put the left cube in the orange box">
+      <button onclick="nlParse()">Parse</button></div>
+    <div class="row muted" id="nlexplain">Parsed commands land in the raw box; review, then Send.</div>
+  </section>
+
+  <section>
     <h2>Raw DoCommand (exactly what the web app sends)</h2>
     <textarea id="raw">{"action": "pick_place", "pick": {"object": "cube", "select": "left"}, "place": {"color": "orange"}, "workcell_ready": true}</textarea>
     <div class="row"><button onclick="sendRaw()">Send to code-2</button></div>
@@ -137,6 +144,15 @@ async function sendRaw() {
   let cmd; try { cmd = JSON.parse(val('raw')); } catch (e) { show('reply', 'Invalid JSON: ' + e.message); return; }
   if (cmd.workcell_ready && !$('clear').checked) { show('reply', 'Tick "workcell clear" first.'); return; }
   try { show('reply', await api('/api/command', cmd)); } catch (e) { show('reply', 'Error: ' + e.message); }
+}
+async function nlParse() {
+  try {
+    const r = await api('/api/nl', {text: val('nltext')});
+    const cmd = r.command;
+    if (r.moves) { cmd.workcell_ready = true; cmd.request_id = 'nl-' + Date.now(); }
+    $('raw').value = JSON.stringify(cmd, null, 1);
+    $('nlexplain').textContent = r.explanation + (r.moves ? ' — MOVES the arm: tick "workcell clear" then Send.' : ' — no motion.');
+  } catch (e) { $('nlexplain').textContent = 'Not understood: ' + e.message; }
 }
 async function stopAll() {
   try { await api('/api/command', {action:'stop'}); } catch (e) {}

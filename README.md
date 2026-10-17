@@ -9,7 +9,8 @@ orange Post-it box.
 | Folder | What's inside |
 |---|---|
 | [pickplace-module/](pickplace-module/) | The Viam module: vision, motion planning and the pick-and-place cycle ([setup and usage](pickplace-module/DEPLOYMENT.md)) |
-| [nl-integration/](nl-integration/) | Coming soon: control the robot in plain language |
+| [dashboard/](dashboard/) | Local test bench: buttons for every command, camera, arm jog, suction, config |
+| [nl-integration/](nl-integration/) | Plain language → robot commands, plus the JSON API schema for web apps |
 
 Example, from the Viam app (CONTROL → code-2 → DoCommand):
 
