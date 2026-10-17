@@ -247,7 +247,11 @@ class PickPlaceCycle:
         from .planning import Planner, box_obstacles, prism
         from viam.proto.common import GeometriesInFrame, WorldState
         cal, s = self.s.calibration, self.s
-        ref = await self.capture(require_ring=False, require_cube=False)
+        try:  # only used as a template for the result; a cluttered overview must not stop the sweep
+            ref = await self.capture(require_ring=False, require_cube=False)
+        except Exception as e:
+            self.event('sweep_reference_frame_failed', error=str(e)[:100])
+            ref = {'issues': []}
         planner = Planner(self.motion, s, self.kin)
         world = WorldState(obstacles=[GeometriesInFrame(reference_frame='world', geometries=[
             prism('scan-objects-envelope', [400, 0, 125], [600, 800, 350])]+box_obstacles(s))])
@@ -504,7 +508,7 @@ class PickPlaceCycle:
         Returns the source to pick from (None = the cube vision found on the table)."""
         try:
             await self.detect(goal, select)
-        except CycleError as e:
+        except (CycleError, ValueError) as e:  # any vision failure = not seen on the table
             if remembered is None:
                 raise
             self.event('cube_not_seen_using_memory', place=remembered['place'], reason=str(e)[:120])
