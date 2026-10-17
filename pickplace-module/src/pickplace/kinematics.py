@@ -131,7 +131,19 @@ class ArmKinematics:
                     solutions.append(q)
         if not solutions:
             raise ValueError(f'No IK solution keeps {margin_deg:g} deg from every joint limit')
+        self.last_solutions = solutions
         return min(solutions, key=lambda q: sum(abs(a-b) for a, b in zip(q, seed)))
+
+    def ik_branches(self, target, seed_deg, margin_deg=5.0):
+        """Nearest solution on each wrist branch (J5 >= 0 / J5 < 0) -> list of 1 or 2 joint sets."""
+        self.ik(target, seed_deg, margin_deg)
+        seed = [float(v) for v in seed_deg]
+        best = {}
+        for q in self.last_solutions:
+            b = q[4] >= 0
+            if b not in best or sum(abs(x-y) for x, y in zip(q, seed)) < sum(abs(x-y) for x, y in zip(best[b], seed)):
+                best[b] = q
+        return list(best.values())
 
     def _solve(self, goal, start, margin, tolerance_mm, tolerance_deg, iterations=200):
         """Damped least squares with the bounded joints (span < 360 deg) kept inside their margin."""

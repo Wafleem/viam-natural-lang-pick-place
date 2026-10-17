@@ -65,8 +65,10 @@ class Settings:
     workcell_obstacles: list = field(default_factory=lambda: [
         {'frame': 'wall-front', 'dims_mm': [100.0, 3000.0, 483.0]},
         {'frame': 'wall-front-2', 'dims_mm': [100.0, 3000.0, 1277.0]},
-        {'frame': 'ceiling', 'dims_mm': [3000.0, 3000.0, 100.0]}])
-    carry_clearance_mm: float = 25.0  # swept-cube check margin against those obstacles
+        {'frame': 'ceiling', 'dims_mm': [3000.0, 3000.0, 100.0]},
+        {'frame': 'cardboard-box', 'dims_mm': [349.0, 286.0, 254.0]}])
+    carry_clearance_mm: float = 50.0  # planner keeps this from those obstacles; the sweep check half of it
+    carry_upright_deg: float = 15.0  # carried joint moves keep the tool within this of vertical (no cube swing)
     box_entry_clearance_mm: float = 30.0
     # Camera sweep when the cube is not fully seen from the overview: sideways shifts (dx, dy mm)
     # of the overview camera at the same height and orientation, and the sweep speed.
@@ -121,7 +123,8 @@ class Settings:
             seal_settle_s=_number(attrs, 'seal_settle_s', 0.5, 0, 5),
             clearance_mm=_number(attrs, 'clearance_mm', 100, 30, 300),
             workcell_obstacles=_obstacles(attrs.get('workcell_obstacles')),
-            carry_clearance_mm=_number(attrs, 'carry_clearance_mm', 25, 0, 200),
+            carry_clearance_mm=_number(attrs, 'carry_clearance_mm', 50, 0, 200),
+            carry_upright_deg=_number(attrs, 'carry_upright_deg', 15, 2, 90),
             box_entry_clearance_mm=_number(attrs, 'box_entry_clearance_mm', 30, 10, 200),
             release_above_goal_mm=_number(attrs, 'release_above_goal_mm', 0, 0, 50),
             sweep_offsets_mm=_offsets(attrs.get('sweep_offsets_mm', [[0, 120], [0, 240], [0, 330], [0, -120], [100, 0]])),

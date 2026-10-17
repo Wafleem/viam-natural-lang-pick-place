@@ -606,7 +606,7 @@ class PickPlaceCycle:
             if not info['still_held']:
                 raise CycleError('The cube dropped while hovering')
             carried = scene_world(self.s, self.observation, t, 'carried', goal, self.workcell)
-            back = await self._carried_segment(planner, await self.joints(), carried, goal_deg=t['q_above_pick'])
+            back = await self._carried_segment(planner, await self.joints(), carried, goal_deg=t['q_above_pick'], upright=self.s.carry_upright_deg)
             await self.execute('return_to_pick', back, self.s.travel_speed_deg_s)
             down = await self._carried_segment(planner, await self.joints(), carried, pose=t['contact'], straight=True,
                                                allow=allowed_contacts(self.s, 'pickup', goal, t['source_place']))

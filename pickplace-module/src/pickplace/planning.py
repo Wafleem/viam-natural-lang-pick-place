@@ -11,7 +11,7 @@ import math
 import numpy as np
 from google.protobuf.json_format import MessageToDict
 from viam.proto.common import Geometry, GeometriesInFrame, Pose, PoseInFrame, RectangularPrism, Transform, Vector3, WorldState
-from viam.proto.service.motion import CollisionSpecification, Constraints, LinearConstraint
+from viam.proto.service.motion import CollisionSpecification, Constraints, LinearConstraint, OrientationConstraint
 
 from .box import cavity_geometry, floor_label
 from .transforms import pose_matrix
@@ -63,6 +63,16 @@ def carried_cube_violations(kin, path, tcp_in_cube, size, workcell, clearance, s
                 if gap < clearance:
                     worst[name] = min(gap, worst.get(name, gap))
     return sorted(worst.items())
+
+
+def max_tool_tilt_deg(kin, path, steps=12):
+    """Largest angle between the tool axis and straight down along a joint path."""
+    worst = 0.0
+    for a, b in zip(path[:-1], path[1:]):
+        for t in np.linspace(0, 1, steps):
+            z = kin.fk([x+(y-x)*t for x, y in zip(a, b)])[:3, 2]
+            worst = max(worst, math.degrees(math.acos(float(np.clip(-z[2], -1, 1)))))
+    return worst
 
 
 def scene_world(settings, observation, targets, cube_state, goal, workcell=()):
@@ -168,10 +178,13 @@ class Planner:
     def __init__(self, motion, settings, kinematics, workcell=()):
         self.motion, self.settings, self.kin, self.workcell = motion, settings, kinematics, list(workcell)
 
-    async def segment(self, start_deg, world, goal_deg=None, pose=None, straight=False, allow=(), margin=None):
+    async def segment(self, start_deg, world, goal_deg=None, pose=None, straight=False, allow=(), margin=None, upright=None):
+        """upright: keep the tool orientation within this many degrees of the start->goal
+        interpolation (a carried cube stays hanging under the cups instead of swinging out)."""
         s = self.settings
         constraints = Constraints(
             linear_constraint=[LinearConstraint(line_tolerance_mm=.5, orientation_tolerance_degs=.5)] if straight else [],
+            orientation_constraint=[OrientationConstraint(orientation_tolerance_degs=upright)] if upright is not None and not straight else [],
             collision_specification=[CollisionSpecification(allows=[CollisionSpecification.AllowedFrameCollisions(frame1=a, frame2=b) for a, b in allow])])
         extra = {'start_state': {'configuration': {s.arm: [math.radians(v) for v in start_deg]}}, 'timeout': 30}
         if goal_deg is not None:
@@ -240,11 +253,16 @@ class Planner:
                 for attempt in range(5):
                     path = await self.segment(start, world, goal_deg=value if what == 'joint' else None,
                                               pose=value if what == 'pose' else None, straight=kind == 'straight',
-                                              allow=allowed_contacts(s, contacts, goal, targets.get('source_place', 'table')))
+                                              allow=allowed_contacts(s, contacts, goal, targets.get('source_place', 'table')),
+                                              upright=s.carry_upright_deg if cube_state == 'carried' and kind == 'joint' else None)
                     # The carried cube is part of the arm: its swept volume must clear the wall
                     # and ceiling with margin. The planner is sampling-based, so re-plan if not.
                     bad = carried_cube_violations(self.kin, path, targets['grasp']['tcp_in_cube'], s.cube_size_mm,
                                                   self.workcell, s.carry_clearance_mm/2) if cube_state == 'carried' else []
+                    if cube_state == 'carried' and kind == 'joint':
+                        tilt = max_tool_tilt_deg(self.kin, path)
+                        if tilt > s.carry_upright_deg+5:
+                            bad = bad+[('tool tilt', -tilt)]
                     if not bad:
                         break
                 else:
