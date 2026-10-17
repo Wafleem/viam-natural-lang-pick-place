@@ -194,3 +194,17 @@ def test_carried_cube_sweep_catches_the_wall(settings, kin):
     tilted[4] += 40  # wrist pitch swings the cube outward
     bad = carried_cube_violations(kin, [q, tilted], G, 200, wall, 25)
     assert bad and bad[0][0] == 'wall-front'
+
+
+def test_hover_trial_returns_cube_to_pick_spot(settings, kin, urdf, tmp_path):
+    cycle, arm, gripper, *_ = make_cycle(settings, kin, urdf, settings.overview_joints_deg)
+    cycle.memory = CubeMemory(tmp_path)
+    cycle.memory.set('table', how='seen')
+    result = asyncio.run(cycle.hover_trial('box', seconds=0))
+    names = [e['stage'] for e in cycle.events]
+    for a, b in [('transfer', 'hovering'), ('hovering', 'return_to_pick'), ('return_to_pick', 'set_down'), ('set_down', 'retract')]:
+        assert names.index(a) < names.index(b)
+    assert 'place' not in names and gripper.calls[-1] == 'open'
+    # set down exactly at the pick contact, and memory unchanged
+    assert kin.fk(arm.q)[:3, 3].tolist() == pytest.approx(kin.fk(settings.overview_joints_deg)[:3, 3].tolist(), abs=1e-6)
+    assert cycle.memory.location['place'] == 'table' and result['hover']['goal'] == 'box'

@@ -46,7 +46,7 @@ IMPLEMENTATION = 'pickplace-v1-open-loop-suction-press'
 LOGGER = getLogger(__name__)
 API_VERSION = 1
 CYCLE_ACTIONS = {'pick_place', 'run', 'box_once', 'ring_once', 'start'}  # start: pre-0.0.25 clients
-MOTION_ACTIONS = CYCLE_ACTIONS | {'reset', 'recover_limits', 'reset_cube', 'scan'}
+MOTION_ACTIONS = CYCLE_ACTIONS | {'reset', 'recover_limits', 'reset_cube', 'scan', 'hover_trial'}
 STILL_ACTIONS = {'dry_run', 'measure_box', 'self_test'}  # background tasks that never move the arm
 
 
@@ -117,6 +117,8 @@ class PickPlaceService(Generic, EasyResource):
                 self.last_result = await self.cycle.scan(args.get('select', 'only'))
             elif action == 'reset_cube':
                 self.last_result = await self.cycle.reset_cube()
+            elif action == 'hover_trial':
+                self.last_result = await self.cycle.hover_trial(goal, select, args['hover_s'])
             elif action == 'dry_run':
                 self.last_result = await self.cycle.dry_run(goal, select, args.get('allow_sweep', False))
             elif action == 'measure_box':
@@ -150,6 +152,8 @@ class PickPlaceService(Generic, EasyResource):
                 'reset': {'moves': True}, 'recover_limits': {'moves': True},
                 'scan': {'moves': True, 'note': 'camera only: overview, then a sweep if the cube is not fully in view'},
                 'reset_cube': {'moves': True, 'note': 'put the cube back on its home spot from wherever code-2 placed it'},
+                'hover_trial': {'moves': True, 'example': {'action': 'hover_trial', 'goal': 'box', 'hover_s': 30, 'workcell_ready': True},
+                                'note': 'pick, hover above the goal for hover_s, then set the cube back where it was picked'},
                 'set_cube_location': {'moves': False, 'example': {'action': 'set_cube_location', 'place': 'box'},
                                       'note': 'tell code-2 where the cube is after moving it by hand (unknown, table, or a goal)'},
                 'self_test': {'moves': False}, 'measure_box': {'moves': False}, 'status': {'moves': False},
@@ -170,7 +174,7 @@ class PickPlaceService(Generic, EasyResource):
         if action == 'scan':
             pick = command.get('pick', {})
             return {'select': pick.get('select', 'only') if isinstance(pick, dict) else 'only'}
-        if action not in CYCLE_ACTIONS | {'dry_run'}:
+        if action not in CYCLE_ACTIONS | {'dry_run', 'hover_trial'}:
             return args
         pick = command.get('pick', {})
         if not isinstance(pick, dict) or pick.get('object', 'cube') != 'cube':
@@ -192,6 +196,11 @@ class PickPlaceService(Generic, EasyResource):
             raise ValueError('goal must be one of: '+', '.join(s.goals))
         if action == 'dry_run':
             args['allow_sweep'] = command.get('workcell_ready') is True  # a sweep moves the camera
+        if action == 'hover_trial':
+            hover = command.get('hover_s', 30)
+            if isinstance(hover, bool) or not isinstance(hover, (int, float)) or not 0 <= hover <= 120:
+                raise ValueError('hover_s must be 0..120 seconds')
+            args['hover_s'] = float(hover)
         return args
 
     async def do_command(self, command: Mapping[str, ValueTypes], *, timeout: Optional[float] = None, **kwargs) -> Mapping[str, ValueTypes]:

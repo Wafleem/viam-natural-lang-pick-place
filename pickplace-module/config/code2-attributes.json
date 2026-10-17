@@ -94,19 +94,19 @@
     {
       "name": "box",
       "floor_center_world_mm": [
-        286.2,
-        -154.6,
-        0.8515
+        295.0,
+        -108.48,
+        0.85
       ],
       "placement_center_xy_mm": [
-        286.2,
-        -154.6
+        295.0,
+        -108.48
       ],
       "inner_dimensions_mm": [
         262.4,
         203.2
       ],
-      "world_yaw_deg": -5.67,
+      "world_yaw_deg": -1.21,
       "rim_z_mm": 130.0
     }
   ],
