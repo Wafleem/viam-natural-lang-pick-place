@@ -26,6 +26,14 @@ def test_simple_intents(text, action):
     assert parse(text)['command']['action'] == action
 
 
+@pytest.mark.parametrize('text,place', [('box', {'type': 'box'}), ('ring', {'type': 'ring'}),
+                                        ('the box please', {'type': 'box'}), ('onto the ring', {'type': 'ring'})])
+def test_one_cube_so_the_place_is_enough(text, place):
+    result = parse(text)
+    assert result['command'] == {'action': 'pick_place', 'pick': {'object': 'cube', 'select': 'only'}, 'place': place}
+    assert result['explanation'].startswith('Pick the cube -> ')
+
+
 def test_unknown_requests_are_refused():
     with pytest.raises(ValueError, match='only know how to move the cube'):
         parse('pick up the banana')

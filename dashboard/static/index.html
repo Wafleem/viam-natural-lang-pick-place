@@ -32,9 +32,23 @@
     background:var(--panel2); color:var(--ink); cursor:pointer; transition:border-color .12s, box-shadow .12s; }
   button:hover { border-color:var(--uv); box-shadow:0 0 0 3px var(--glow); }
   button.primary { background:var(--uv); border-color:var(--uv); color:#fff; }
-  button.mic.pill { border-radius:999px; padding:5px 14px; font-weight:600; background:rgba(255,255,255,.16);
-    border:1px solid rgba(255,255,255,.4); color:#fff; white-space:nowrap; touch-action:none; user-select:none; -webkit-user-select:none; }
-  button.mic.on { background:var(--warn); border-color:var(--warn); color:#fff; }
+  .say-mic { margin:0 0 12px; }
+  button.mic.pill { border-radius:999px; padding:10px 22px; font-size:16px; font-weight:700; background:var(--uv); border:1px solid var(--uv);
+    color:#fff; white-space:nowrap; touch-action:none; user-select:none; -webkit-user-select:none; }
+  button.mic.on { background:var(--warn); border-color:var(--warn); color:#fff; animation:listen 1s ease-in-out infinite; }
+  @keyframes listen { 50% { box-shadow:0 0 0 7px rgba(255,181,71,.35); } }
+  @media (prefers-reduced-motion: reduce) { button.mic.on { animation:none; } }
+  .say-input { display:flex; flex-wrap:wrap; gap:8px; }
+  .say-input input { flex:1 1 260px; min-width:0; font-size:16px; padding:10px 12px; border-radius:10px; }
+  .say-input input:focus { outline:none; border-color:var(--uv); box-shadow:0 0 0 3px var(--glow); }
+  .say-input button { font-size:15px; padding:9px 16px; border-radius:10px; }
+  .say-ex { display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin:10px 0; }
+  button.ex { border-radius:999px; padding:4px 11px; font-size:12px; color:var(--muted); }
+  .say-result { margin:4px 0 8px; padding:10px 12px; border-radius:10px; border:1px solid var(--line); background:var(--panel2); font-size:14px; }
+  .say-result[data-kind="listen"] { border-color:var(--warn); }
+  .say-result[data-kind="ok"] { border-color:var(--ok); } .say-result[data-kind="ok"]::before { content:"✓ "; color:var(--ok); font-weight:700; }
+  .say-result[data-kind="move"] { border-color:var(--warn); } .say-result[data-kind="move"]::before { content:"⚠ "; color:var(--warn); }
+  .say-result[data-kind="bad"] { border-color:var(--bad); } .say-result[data-kind="bad"]::before { content:"✗ "; color:var(--bad); font-weight:700; }
   button.move { border-color:var(--warn); } button.move::before { content:"⚠ "; color:var(--warn); }
   button.primary.move::before { color:#fff; }
   button.stop { background:#e11d48; border-color:#ff8fa6; color:#fff; font-weight:700; letter-spacing:.08em; padding:8px 16px; }
@@ -63,7 +77,8 @@
   .bar { height:6px; border-radius:3px; background:var(--line); overflow:hidden; min-width:70px; }
   .bar i { display:block; height:100%; background:var(--ok); } .bar i.warn { background:var(--warn); } .bar i.bad { background:var(--bad); }
   img.cam { width:100%; border-radius:10px; background:var(--code); min-height:160px; border:1px solid var(--line); }
-  .kv { display:grid; grid-template-columns:auto 1fr; gap:3px 12px; font-size:13px; } .kv span:nth-child(odd) { color:var(--muted); }
+  .kv { display:grid; grid-template-columns:auto minmax(0,1fr); gap:3px 12px; font-size:13px; }
+  .kv span:nth-child(odd) { color:var(--muted); white-space:nowrap; } .kv span:nth-child(even) { overflow-wrap:anywhere; }
   .pill-ok { color:var(--ok); } .pill-bad { color:var(--bad); } .pill-warn { color:var(--warn); }
   .events li { margin:2px 0; font:12px ui-monospace,Menlo,monospace; } .events { padding-left:18px; max-height:260px; overflow:auto; }
   #toast { position:fixed; right:16px; bottom:16px; max-width:min(560px,90vw); background:var(--panel2); border:1px solid var(--uv);
@@ -86,7 +101,6 @@
   <span id="c-stage" class="chip">stage —</span>
   <span id="c-impl" class="chip">code-2 —</span>
   <span id="c-limit" class="chip">limits —</span>
-  <button class="mic pill" id="mic" title="Hold, speak, release" onpointerdown="micDown(event)" onpointerup="micUp()" onpointerleave="micUp()">🎤 Hold to talk</button>
   <label class="clear"><input type="checkbox" id="clear"> workcell clear</label>
   <button class="stop" onclick="stopAll()">STOP</button>
   <button class="ghost" style="color:#fff" onclick="toggleTheme()" title="light / dark">◐</button>
@@ -95,13 +109,17 @@
 <main>
 <!-- RUN -->
 <div class="tab" data-tab="Run">
-  <section class="wide">
-    <h2 style="font-family:'Comic Sans MS','Comic Sans','Chalkboard SE',cursive">Tell the robot</h2>
-    <div class="row"><input type="text" id="nltext" style="flex:1" placeholder="or type a command" value="put the left cube in the orange box">
-      <button onclick="nlParse()">Parse</button>
-      <button class="primary" onclick="saySend()">Send</button></div>
-    <div class="muted" id="nlexplain">Hold <b>🎤 Hold to talk</b> at the top and say what to do, or type it. Nothing moves until you press <b>Send</b>.</div>
-    <div class="muted">Voice uses the browser's speech recognition (Chrome sends audio to Google). Commands that move the arm need <i>workcell clear</i> ticked.</div>
+  <section class="wide say">
+    <div class="say-mic"><button class="mic pill" id="mic" title="Hold, speak, release" onpointerdown="micDown(event)" onpointerup="micUp()" onpointerleave="micUp()">🎤 Hold to talk</button></div>
+    <div class="say-input"><input type="text" id="nltext" placeholder="e.g. put the cube in the box" value=""
+        onkeydown="if (event.key === 'Enter') nlParse()" aria-label="Command for the robot">
+      <button onclick="nlParse()">Check</button>
+      <button class="primary" onclick="saySend()">Send to robot</button></div>
+    <div class="say-ex"><span class="muted">Try:</span>
+      <button class="ex" onclick="tryEx(this)">put the cube in the box</button>
+      <button class="ex" onclick="tryEx(this)">put the cube on the ring</button></div>
+    <div class="say-result" id="nlexplain" data-kind="idle" aria-live="polite">Say where the cube should go: <b>the box</b> or <b>the ring</b>. Nothing moves until you press <b>Send to robot</b>.</div>
+    <div class="muted">Voice uses the browser's speech recognition (Chrome sends audio to Google).</div>
   </section>
   <section class="wide">
     <h2>Full flows · big buttons</h2>
@@ -121,8 +139,7 @@
   </section>
   <section>
     <h2>Pick &amp; place</h2>
-    <div class="row">cube <select id="select"><option>only</option><option>left</option><option>right</option><option>nearest</option><option>farthest</option></select>
-      → <select id="place"><option value="ring">ring</option></select></div>
+    <div class="row">cube → <select id="place"><option value="ring">ring</option></select></div>
     <div class="row"><button onclick="cmd(task('dry_run'))">Dry run · no motion</button>
       <button class="move primary" onclick="cmd(task('pick_place'), true)">Pick &amp; place</button></div>
     <div class="row"><button class="move" onclick="cmd({action:'ring_once'}, true)">ring_once</button>
@@ -292,7 +309,7 @@ function show(name) { document.querySelectorAll('.tab').forEach(t => t.classList
 $('tabs').innerHTML = TABS.map(t => `<button onclick="show('${t}')">${t}</button>`).join('');
 function toggleTheme() { const r = document.documentElement; r.dataset.theme = r.dataset.theme === 'light' ? 'dark' : 'light'; }
 // ---- commands
-function task(action) { return {action, pick:{object:'cube', select:val('select')}, place:{goal:val('place')}}; }
+function task(action) { return {action, pick:{object:'cube', select:'only'}, place:{goal:val('place')}}; }
 async function cmd(c, moves) {
   if (moves) { if (needClear()) return; c.workcell_ready = true; c.request_id = 'bench-' + Date.now(); }
   $('raw').value = JSON.stringify(c);
@@ -309,11 +326,13 @@ async function nlParse() {
   try { const r = await api('/api/nl', {text: val('nltext')}); const c = r.command;
     if (r.moves) { c.workcell_ready = true; c.request_id = 'nl-' + Date.now(); }
     $('raw').value = JSON.stringify(c, null, 1);
-    $('nlexplain').textContent = r.explanation + (r.moves ? ' — moves the arm: tick workcell clear, then Send.' : ' — no motion.');
+    say(r.moves ? 'move' : 'ok', r.explanation + (r.moves ? ' — this moves the arm: tick workcell clear, then Send to robot.' : ' — no motion, safe to send.'));
     return true;
-  } catch (e) { $('nlexplain').textContent = 'Not understood: ' + e.message; return false; }
+  } catch (e) { say('bad', "Sorry, I didn't understand that. " + e.message); return false; }
 }
-// Tell the robot → Send: parse what is in the box now, then send it like the raw box's Send.
+function say(kind, text) { const b = $('nlexplain'); b.dataset.kind = kind; b.textContent = text; }
+function tryEx(b) { $('nltext').value = b.textContent; nlParse(); }
+// Voice card → Send: parse what is in the box now, then send it like the raw box's Send.
 async function saySend() { if (await nlParse()) await sendRaw(); }
 // ---- voice: hold to talk. Speech recognisers return several guesses; try them in order
 // and keep the first one the parser understands (helps with accents and misheard words).
@@ -321,8 +340,7 @@ const Speech = window.SpeechRecognition || window.webkitSpeechRecognition;
 let rec = null, guesses = [];
 function micDown(e) {
   e.preventDefault();
-  show('Run'); window.scrollTo({top:0});  // the pill is on every tab; what it hears lands in Tell the robot
-  if (!Speech) { $('nlexplain').textContent = 'Voice input needs Chrome or Edge; this browser has no speech recognition.'; return; }
+  if (!Speech) { say('bad', 'Voice input needs Chrome or Edge; this browser has no speech recognition. You can still type.'); return; }
   if (rec) return;
   guesses = []; rec = new Speech();
   rec.lang = navigator.language || 'en-US'; rec.interimResults = true; rec.continuous = true; rec.maxAlternatives = 5;
@@ -332,21 +350,21 @@ function micDown(e) {
       : [finals.map(r => r[0].transcript.trim()).join(' ')];
     $('nltext').value = [...ev.results].map(r => r[0].transcript).join(' ').trim();
   };
-  rec.onerror = ev => { $('nlexplain').textContent = 'Voice error: ' + ev.error
-    + (ev.error === 'not-allowed' ? ' (allow the microphone for this page)' : ev.error === 'network' ? ' (this browser cannot reach its speech service; try Chrome)' : ''); };
-  rec.onend = () => { rec = null; $('mic').classList.remove('on'); voiceParse(); };
-  $('mic').classList.add('on'); $('nlexplain').textContent = 'Listening… release the button when you finish.';
+  rec.onerror = ev => { say('bad', 'Voice error: ' + ev.error
+    + (ev.error === 'not-allowed' ? ' (allow the microphone for this page)' : ev.error === 'network' ? ' (this browser cannot reach its speech service; try Chrome)' : '')); };
+  rec.onend = () => { rec = null; $('mic').classList.remove('on'); $('mic').textContent = '🎤 Hold to talk'; voiceParse(); };
+  $('mic').classList.add('on'); $('mic').textContent = '🎙 Listening…'; say('listen', 'Listening… let go of the button when you finish.');
   rec.start();
 }
 function micUp() { if (rec) rec.stop(); }
 async function voiceParse() {
   const options = guesses.filter(Boolean);
-  if (!options.length) { if (!/error/i.test($('nlexplain').textContent)) $('nlexplain').textContent = "Didn't catch that. Hold the button and speak again."; return; }
+  if (!options.length) { if ($('nlexplain').dataset.kind !== 'bad') say('bad', "Didn't catch that. Hold the button and speak again."); return; }
   let chosen = options[0];
   for (const text of options) { try { await api('/api/nl', {text}); chosen = text; break; } catch (e) { /* try the next guess */ } }
   $('nltext').value = chosen;
   await nlParse();
-  $('nlexplain').textContent = `🎤 heard "${chosen}"` + (options.length > 1 && chosen !== options[0] ? ` (best of ${options.length} guesses)` : '') + ' — ' + $('nlexplain').textContent;
+  say($('nlexplain').dataset.kind, `🎤 heard "${chosen}"` + (options.length > 1 && chosen !== options[0] ? ` (best of ${options.length} guesses)` : '') + ' — ' + $('nlexplain').textContent);
 }
 async function armdo(command, connection_type) {
   try { const r = await api('/api/arm/do', {command, connection_type}); $('armreply').textContent = pretty(r); toast(r); }
@@ -507,7 +525,7 @@ async function poll() {
     const p = s.tcp_world; $('tcp').textContent = `TCP  x ${p.x.toFixed(1)}  y ${p.y.toFixed(1)}  z ${p.z.toFixed(1)} mm`;
     $('events').innerHTML = (c.events || []).slice().reverse().map(e => `<li>${esc((e.t || '').slice(11, 19))}  <b>${esc(e.stage)}</b> ${esc(Object.entries(e).filter(([k]) => !['t','stage'].includes(k)).map(([k, v]) => `${k}=${typeof v === 'object' ? JSON.stringify(v) : v}`).join(' '))}</li>`).join('') || '<li class="muted">no events yet</li>';
     const o = c.last_result && c.last_result.outcome;
-    $('outcome').innerHTML = `<span>last request</span><span>${esc(c.last_request ? JSON.stringify(c.last_request) : '—')}</span><span>state</span><span>${esc(c.state || '—')}</span>` +
+    $('outcome').innerHTML = `<span>last request</span><span>${esc(c.last_request ? JSON.stringify(c.last_request, null, 1).replace(/\n\s*/g, ' ') : '—')}</span><span>state</span><span>${esc(c.state || '—')}</span>` +
       `<span>error</span><span class="${c.error ? 'pill-bad' : ''}">${esc(c.error || 'none')}</span>` +
       (o ? `<span>vision check</span><span class="${o.cube_left_pick_spot ? 'pill-ok' : 'pill-warn'}">${esc(o.detail)}</span>` : '');
     $('lastresult').textContent = pretty(c.last_result || {});
