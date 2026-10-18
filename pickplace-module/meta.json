@@ -3,7 +3,7 @@
   "module_id": "hackathons:armfarm19-vision-pickplace",
   "visibility": "private",
   "url": "",
-  "description": "armfarm19 vision pick-and-place: white cube to black ring or orange Post-it box; open-loop suction press",
+  "description": "armfarm19 vision pick-and-place: a cube to a ring, a table box or a wall shelf box; closed-loop suction, natural-language ready",
   "models": [
     {
       "api": "rdk:service:generic",

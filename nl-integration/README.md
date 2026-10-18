@@ -1,7 +1,19 @@
 # nl-integration
 
-Turns plain language into robot commands. It works today with simple rules; the plan is to
-swap in a language model and merge with the team's web app.
+Turns plain language into robot commands. It's rule-based and tolerant of speech-recognition
+slips ("rink" → ring, "books" → box, "ping" → pink). The dashboard's voice box uses it. It reads
+the live goals from code-2's `describe`, so a newly configured box becomes nameable by its colour
+or label.
+
+| Say | Command |
+|---|---|
+| "put the cube in the orange box" / "the box on the table" | `pick_place` → `box` |
+| "put the cube in the pink box" / "the box on the wall" / "on the shelf" | `pick_place` → `pink` |
+| "put the cube on the ring" / "the hoop" | `pick_place` → `ring` |
+| "put the cube on the table" | `pick_place` → `home` |
+| "reset the cube" / "take the cube home" / "put the cube back" | `reset_cube`: fetch it home from wherever it is |
+| "the cube is home" / "I put the cube back" | `set_cube_location home`: record only, nothing moves |
+| "go home" · "status" · "let go" · "stop" | `reset` · `status` · `release` · `stop` |
 
 ```bash
 pickplace-module/.venv/bin/python nl-integration/send.py "can you put the left cube on the ring"
@@ -17,7 +29,7 @@ Add `--send` to send it to the robot, and also `--confirm` for commands that mov
 | `send.py` | command-line demo; dry run unless told otherwise |
 | `test_nl.py` | parser tests: `pickplace-module/.venv/bin/python -m pytest nl-integration` |
 
-The dashboard (`dashboard/`) has a **Say it** box that does the same, with a Send button.
+The dashboard (`dashboard/`) has a **Tell the robot** box with hold-to-talk that does the same, with a Send button.
 
 ## Talking to the robot from a web app
 

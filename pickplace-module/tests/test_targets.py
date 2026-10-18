@@ -17,7 +17,7 @@ def test_old_attributes_still_parse():
 
 
 @pytest.mark.parametrize('bad', [{'press_depth_mm': 25}, {'press_depth_mm': -1}, {'default_goal': 'shelf'},
-                                 {'aligned_depth_enabled': False}, {'travel_speed_deg_s': 50}])
+                                 {'aligned_depth_enabled': False}, {'travel_speed_deg_s': 150}])
 def test_config_rejects_bad_values(attrs, bad):
     with pytest.raises(ValueError):
         Settings.from_attributes({**attrs, **bad})

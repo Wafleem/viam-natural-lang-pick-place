@@ -131,14 +131,14 @@ class PickPlaceCycle:
             finally:
                 self.lease_token = ''
 
-    # ---- suction (open loop) ---------------------------------------------
+    # ---- suction ----------------------------------------------------------
     async def suction_on(self):
         self.event('suction_on')
-        # Open loop: Grab's bool mirrors the unreliable holding sensor (false in the air), so it
+        # Grab's bool mirrors the holding sensor, which is false in the air (before contact), so it
         # never gates the press. Only an exception means the command itself failed.
         reply = await self.gripper.grab(timeout=5)
         if reply is False:
-            self.event('grab_reported_not_holding', note='ignored: open-loop suction')
+            self.event('grab_reported_not_holding', note='expected before contact; the seal is checked after the press')
 
     async def suction_off(self, dwell=True):
         self.event('suction_off')

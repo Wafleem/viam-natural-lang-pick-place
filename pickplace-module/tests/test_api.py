@@ -62,7 +62,8 @@ def test_describe_is_json_and_lists_goals(attrs, kin, urdf):
     svc = make_service(two_box_settings(attrs), kin, urdf)
     d = asyncio.run(svc.do_command({'action': 'describe'}))
     json.dumps(d)
-    assert [g['name'] for g in d['place']['goals']] == ['home', 'ring', 'box', 'blue_box']
+    assert [g['name'] for g in d['place']['goals']] == ['home', 'ring', 'box', 'blue_box', 'pink']
+    assert next(g for g in d['place']['goals'] if g['name'] == 'pink')['entry'] == 'side'
     assert d['place']['goals'][3]['color'] == 'blue' and 'left' in d['pick']['select']
 
 
@@ -112,3 +113,17 @@ def test_legacy_start_still_accepted(attrs, kin, urdf):
     assert svc._arguments('start', {'goal': 'ring'}) == {'select': 'only', 'goal': 'ring'}
     with pytest.raises(ValueError, match='workcell_ready'):
         asyncio.run(svc.do_command({'action': 'start', 'goal': 'ring'}))
+
+
+def test_command_schema_lists_every_service_action():
+    """The JSON schema handed to web apps / LLMs must not drift from what code-2 accepts."""
+    import json
+    from pathlib import Path
+    from pickplace.service import MOTION_ACTIONS, STILL_ACTIONS
+    schema = json.loads((Path(__file__).resolve().parents[2]/'nl-integration'/'command_schema.json').read_text())
+    listed = set()
+    for alt in schema['oneOf']:
+        a = alt['properties']['action']
+        listed |= set(a.get('enum', [])) | ({a['const']} if 'const' in a else set())
+    legacy = {'run', 'box_once', 'ring_once', 'start'}  # aliases kept for older clients
+    assert (MOTION_ACTIONS | STILL_ACTIONS) - legacy <= listed

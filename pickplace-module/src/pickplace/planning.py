@@ -184,6 +184,17 @@ class PlanError(RuntimeError):
     pass
 
 
+PLANNER_CRASH_RETRIES = 3
+_CRASH_MARKERS = ('nil pointer', 'invalid memory address', 'Status.INTERNAL')
+
+
+def planner_crashed(error):
+    """True for the motion service's own internal failures (worth retrying), not for planning
+    verdicts such as collisions, unreachable goals or timeouts."""
+    text = f'{error!r} {error}'
+    return any(marker in text for marker in _CRASH_MARKERS)
+
+
 class Planner:
     def __init__(self, motion, settings, kinematics, workcell=()):
         self.motion, self.settings, self.kin, self.workcell = motion, settings, kinematics, list(workcell)
@@ -204,7 +215,17 @@ class Planner:
                    'constraints': MessageToDict(constraints, preserving_proto_field_name=True)}
         if pose is not None:
             request['destination'] = {'reference_frame': 'world', 'pose': pose}
-        reply = await self.motion.do_command({'plan': json.dumps(request)}, timeout=180)
+        for attempt in range(PLANNER_CRASH_RETRIES+1):
+            try:
+                reply = await self.motion.do_command({'plan': json.dumps(request)}, timeout=180)
+                break
+            except Exception as e:
+                # The builtin motion service occasionally panics internally ("invalid memory address or
+                # nil pointer dereference"), mostly under concurrent plan requests. Planning never moves
+                # the arm, so the same request is simply sent again.
+                if attempt == PLANNER_CRASH_RETRIES or not planner_crashed(e):
+                    raise
+                await asyncio.sleep(.3*(attempt+1))
         return self.validate(reply, start_deg, goal_deg, pose, margin)
 
     def validate(self, reply, start_deg, goal_deg=None, pose=None, margin=None):
@@ -264,17 +285,10 @@ class Planner:
             upright = s.carry_upright_deg if cube_state == 'carried' and kind == 'joint' and not side else None
             checked = [w for w in self.workcell if not (side and name in ('place', 'retract') and w[0] in side['panels'])]
             for attempt in range(5):
-                for crash in range(3):  # the motion service occasionally crashes internally (nil pointer): retry
-                    try:
-                        path = await self.segment(start, world, goal_deg=value if what == 'joint' else None,
-                                                  pose=value if what == 'pose' else None, straight=kind == 'straight',
-                                                  allow=allowed_contacts(s, contacts, goal, targets.get('source_place', 'table')),
-                                                  upright=upright)
-                        break
-                    except Exception as e:
-                        if crash == 2 or not any(k in str(e) for k in ('nil pointer', 'INTERNAL', 'invalid memory address')):
-                            raise
-                        await asyncio.sleep(.3)
+                path = await self.segment(start, world, goal_deg=value if what == 'joint' else None,
+                                          pose=value if what == 'pose' else None, straight=kind == 'straight',
+                                          allow=allowed_contacts(s, contacts, goal, targets.get('source_place', 'table')),
+                                          upright=upright)
                 # The carried cube is part of the arm: its swept volume must clear the walls
                 # and ceiling with margin. The planner is sampling-based, so re-plan if not.
                 bad = carried_cube_violations(self.kin, path, targets['grasp']['tcp_in_cube'], s.cube_size_mm,
@@ -322,7 +336,7 @@ class Planner:
             parts = await asyncio.gather(chain(['approach'], list(start_deg)), chain(['descend', 'press', 'lift'], qp),
                                          chain(['transfer'], qp), chain(['place', 'retract'], qq), chain(['return'], qq))
         except Exception as e:
-            if not any(k in str(e) for k in ('nil pointer', 'INTERNAL', 'invalid memory address')):
+            if not planner_crashed(e):
                 raise
             # The motion service did not survive concurrent requests this time: plan one chain at a time.
             parts = [await chain(['approach'], list(start_deg)), await chain(['descend', 'press', 'lift'], qp),

@@ -110,3 +110,73 @@ the table patch, the ring, every box wall and the workcell walls.
    `dry_run` with the new goal. The new box is a goal and an obstacle for every other goal.
 5. Clearance rule of thumb: opening ≥ cube size + 2 × (expected position error), plus margin for
    yaw. For the 200 mm cube, an opening under about 210 mm on either axis is very tight.
+
+## 8. Sweeps: seeing a cube outside the overview
+
+The home spot is outside the overview image, so the arm *sweeps*. It moves the camera sideways by
+`sweep_offsets_mm` with the same orientation and height (IK on the overview pose shifted by (dx, dy)).
+A sweep view is a pure translation `s` of the overview camera. A point seen there therefore maps
+like the same pixel and depth seen from the overview, plus the shift:
+
+    tool = cal(raw − s) + s = calibrated_xy(raw) + (I − R(γ)) · s
+
+where `cal(p) = R(γ)·p + o` is the overview calibration. The first version anchored on the ring
+instead. It measured its correction at the ring's height and applied it to the cube top, 170 mm
+higher, and with the camera tilted about 20° that was about 25 mm off. The shift form predicted the
+cube's true position (checked by setting it down and re-measuring) to within 1 mm. When a sweep
+finds the cube, the cycle plans straight from that view instead of driving back to the overview.
+
+## 9. Side entry: the shelf box on the wall
+
+The pink box is an open shelf facing the robot (`side_boxes.pink`). A top-down entry is impossible:
+it's 231 mm tall inside, and a cube plus gripper needs about 317 mm. So the cube is turned **level**
+and slid in along +x.
+
+- **Release pose** (`task.side_releases`): the gripped face is turned toward the robot (cube-frame
+  Z = −x), with an optional `roll_deg` about the slide axis. The cube centre is at
+  `back_x − back_clearance − 100`, `center_y`, `floor_z + release_above_floor + 100`. The TCP is
+  `C_goal · G`, the same grasp transform as every other placement.
+- **Pre-insert pose**: straight back along −x until the whole cube clears the opening by
+  `entry_margin_mm`.
+- **One arm configuration for the slide** (`task.side_slide_joints`): the release is solved from
+  the natural reach-in pose (arm straight out, wrist level). The pre-insert is found by walking back
+  in 10–25 mm steps, seeding each solve from the last, so the straight slide never changes branch.
+  A pre-insert solved independently picked a folded pose whose slide jumped branches.
+- **Retrieval** (`cycle.retrieve_from_side`) is the reverse:
+  1. level empty approach;
+  2. slide to the cube's resting face (it dropped `release_above_floor` onto the floor);
+  3. suction on and a 15 mm press, so the cube slides to the back wall and the cups compress;
+  4. back off the press, so the cube sits on the cups as modelled;
+  5. lift 12 mm off the floor;
+  6. slide out, carry home and set it down tool-down.
+
+## 10. The carried cube and the workcell
+
+- The cube is attached to the gripper in the plan request (`scene_world`, cube state `carried`).
+  Viam checks that attached geometry against obstacles **in the request**, but not against the
+  machine's frame-system obstacles. So the walls, the ceiling and the shelf panels are added to every
+  request from their live frame poses (`cycle.workcell_scene`, `planning.workcell_prisms`).
+- Walls and the ceiling are grown by `carry_clearance_mm` (50) so the planner keeps that margin.
+  Shelf panels use their true size: a buffer around a box mounted over the work area blocked valid
+  arm poses for the other goals.
+- After planning, every carrying path is swept through the cube's real volume at the executed joint
+  interpolation (`planning.carried_cube_violations`), and re-planned if it comes too close.
+- Carries to table goals use an orientation constraint (`carry_upright_deg`). A joint-space carry
+  can otherwise tilt the wrist far enough to swing a 200 mm cube about 250 mm sideways.
+- **Pick and place are chosen together** (`task.compute_targets`). Each candidate grip is tried on
+  both wrist branches, and the carried transfer is weighted three times as heavily. So a wrist flip,
+  which swings the cube, happens on the empty approach, never while carrying.
+
+## 11. A replacement camera
+
+When the D435 was swapped, the new unit's intrinsics and mount differed. We fitted a correction, so
+the calibration taught with the old camera stayed valid (`camera_correction`):
+
+1. Pick fixed features visible in a saved old-camera overview frame and in a new-camera frame: two
+   tape marks, a blue tape mark and the ring centre.
+2. Fit `depth_scale` and a rigid 4×4 transform from the new camera frame to the old one (Kabsch over
+   a depth-scale grid). Residuals were 2.5–5.5 mm; the ring was then pinned exactly.
+3. Every capture scales the new camera's depth and uses `FK_camera · matrix` as the geometry pose.
+4. **Absolute depth** was settled separately. The same back wall imaged from two camera distances
+   100 mm apart agrees only at scale 0.99. So the new camera reads true, and the correction
+   reproduces the old camera's 6 % short depth that the calibration was built on.

@@ -63,7 +63,7 @@ class Settings:
     cube_size_mm: float = 200.0
     table_z_mm: float = -23.0
     # Pickup: approach above the cube, descend to pre-contact, switch suction on,
-    # then press press_depth_mm below the taught contact height. Suction is open loop.
+    # then press press_depth_mm below the taught contact height; the holding sensor confirms the seal.
     press_depth_mm: float = 10.0
     pre_contact_mm: float = 20.0
     suction_dwell_s: float = 1.0  # the longest wait for the holding sensor to report a seal

@@ -15,7 +15,7 @@ browser.
 
 | Tab | What you can do |
 |---|---|
-| **Run** | Pick & place builder (cube left/right/nearest… → ring or any box); dry run; `ring_once` / `box_once`; `self_test`, `status`, `describe`, suction off, reset, recover_limits, clear controller error; *Say it* (plain language → command); raw DoCommand box; outcome card (including the vision pickup check); event timeline |
+| **Run** | **Tell the robot**: hold-to-talk or type, read-back with a chosen voice, review, then *Send to robot*. **Big flows**: PRE-FLIGHT, SCAN, RECOVER & HOME, CUBE → BOX / PINK / RING / HOME, CUBE IS HOME (no motion), FULL TOUR, HOVER TEST. Also a pick & place builder, dry run, raw DoCommand, outcome card and event timeline. Moving commands are followed to the end; one cut off by a code-2 restart is reported as interrupted |
 | **Vision** | Wrist-camera snapshot or 1 fps live view, with detection overlay; `measure_box` → candidate → *Add candidate to config* |
 | **Arm** | Joint table with limit-clearance bars and ± jogs; stop arm; suction on/off; vacuum wiring test (contact vs plugin); xArm `get_state` / `get_error` / `clear_error` |
 | **Config** | Tuning form for every key (blank = default); box table with fit gaps, *centre* and *remove*; raw attributes editor |

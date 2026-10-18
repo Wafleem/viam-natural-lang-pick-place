@@ -1,10 +1,8 @@
 # Everyday commands. Python lives in pickplace-module/.venv (make setup).
 PY      := pickplace-module/.venv/bin/python
-NODE22  := npx -y -p node@22 node
-WEB     := code3-web/natural-language-ui
 GOAL    ?= box
 
-.PHONY: help setup test test-module test-nl test-dashboard test-web dashboard status plan-check deploy select
+.PHONY: help setup test test-module test-nl test-dashboard dashboard status plan-check deploy select
 
 help:            ## list targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | sed 's/:.*## /\t/' | sort
@@ -13,7 +11,7 @@ setup:           ## create the venv and install everything the tests and tools n
 	python3 -m venv pickplace-module/.venv
 	$(PY) -m pip install -q -r pickplace-module/requirements.txt -r pickplace-module/requirements-dev.txt -r dashboard/requirements.txt
 
-test: test-module test-nl test-dashboard test-web  ## run every offline test suite (no robot needed)
+test: test-module test-nl test-dashboard  ## run every offline test suite (no robot needed)
 
 test-module:     ## pick-and-place module: kinematics, vision, planning, cycle, API
 	cd pickplace-module && .venv/bin/python -m pytest -q
@@ -23,9 +21,6 @@ test-nl:         ## plain-language parser
 
 test-dashboard:  ## dashboard server against a fake robot
 	$(PY) -m pytest -q dashboard
-
-test-web:        ## code-3 web app (needs Node 22; skipped if not checked out)
-	@if [ -f $(WEB)/package.json ]; then cd $(WEB) && npm ci --silent && $(NODE22) build.mjs && $(NODE22) --test test/*.test.mjs; else echo "no $(WEB) on this branch"; fi
 
 dashboard:       ## start the Ultraviolet test bench on http://localhost:8765
 	$(PY) dashboard/server.py
