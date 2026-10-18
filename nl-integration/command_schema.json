@@ -7,17 +7,46 @@
     {
       "title": "pick_place / dry_run",
       "type": "object",
-      "required": ["action", "place"],
+      "required": [
+        "action",
+        "place"
+      ],
       "properties": {
-        "action": {"enum": ["pick_place", "dry_run"]},
+        "action": {
+          "enum": [
+            "pick_place",
+            "dry_run"
+          ]
+        },
         "pick": {
           "type": "object",
           "properties": {
-            "object": {"const": "cube"},
+            "object": {
+              "const": "cube"
+            },
             "select": {
               "oneOf": [
-                {"enum": ["only", "left", "right", "nearest", "farthest"]},
-                {"type": "object", "required": ["index"], "properties": {"index": {"type": "integer", "minimum": 0}}}
+                {
+                  "enum": [
+                    "only",
+                    "left",
+                    "right",
+                    "nearest",
+                    "farthest"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "index"
+                  ],
+                  "properties": {
+                    "index": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                }
               ],
               "description": "left/right as seen by the overview camera; index counts cubes left to right; only = exactly one cube must be visible"
             }
@@ -25,24 +54,135 @@
         },
         "place": {
           "oneOf": [
-            {"type": "string", "description": "goal name: ring or a configured box name"},
-            {"type": "object", "required": ["goal"], "properties": {"goal": {"type": "string"}}},
-            {"type": "object", "required": ["type"], "properties": {"type": {"enum": ["ring", "box"]}}},
-            {"type": "object", "required": ["color"], "properties": {"color": {"type": "string"}}}
+            {
+              "type": "string",
+              "description": "goal name: home, ring, or a configured box name (e.g. box, pink)"
+            },
+            {
+              "type": "object",
+              "required": [
+                "goal"
+              ],
+              "properties": {
+                "goal": {
+                  "type": "string"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "type"
+              ],
+              "properties": {
+                "type": {
+                  "enum": [
+                    "ring",
+                    "box",
+                    "home"
+                  ]
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "color"
+              ],
+              "properties": {
+                "color": {
+                  "type": "string"
+                }
+              }
+            }
           ]
         },
-        "workcell_ready": {"type": "boolean", "description": "required true for pick_place"},
-        "request_id": {"type": "string", "maxLength": 80, "description": "unique per attempt; a repeat is ignored"}
+        "workcell_ready": {
+          "type": "boolean",
+          "description": "required true for pick_place"
+        },
+        "request_id": {
+          "type": "string",
+          "maxLength": 80,
+          "description": "unique per attempt; a repeat is ignored"
+        }
       }
     },
     {
       "title": "simple commands",
       "type": "object",
-      "required": ["action"],
+      "required": [
+        "action"
+      ],
       "properties": {
-        "action": {"enum": ["describe", "status", "self_test", "release", "stop", "reset", "recover_limits", "measure_box"]},
-        "name": {"type": "string", "description": "measure_box: name for the new box"},
-        "workcell_ready": {"type": "boolean", "description": "required true for reset and recover_limits"}
+        "action": {
+          "enum": [
+            "describe",
+            "status",
+            "self_test",
+            "release",
+            "stop",
+            "reset",
+            "recover_limits",
+            "measure_box",
+            "reset_cube",
+            "scan",
+            "recover_cube"
+          ]
+        },
+        "name": {
+          "type": "string",
+          "description": "measure_box: name for the new box"
+        },
+        "workcell_ready": {
+          "type": "boolean",
+          "description": "required true for reset and recover_limits"
+        }
+      },
+      "description": "reset: arm to the overview. reset_cube: bring the cube from wherever it is (a box, the ring, the table) to its home spot. scan: camera only. recover_cube: after a failure, set a still-gripped cube back where it was picked. Moving ones need workcell_ready: true."
+    },
+    {
+      "title": "set_cube_location",
+      "description": "Tell code-2 where the cube is after moving it by hand. Nothing moves.",
+      "type": "object",
+      "required": [
+        "action",
+        "place"
+      ],
+      "properties": {
+        "action": {
+          "const": "set_cube_location"
+        },
+        "place": {
+          "type": "string",
+          "description": "unknown, table, home, or a goal name"
+        }
+      }
+    },
+    {
+      "title": "hover_trial",
+      "description": "Pick the cube, hold it just above/outside a goal for hover_s seconds so a person can check alignment, then set it back where it was picked.",
+      "type": "object",
+      "required": [
+        "action",
+        "goal",
+        "workcell_ready"
+      ],
+      "properties": {
+        "action": {
+          "const": "hover_trial"
+        },
+        "goal": {
+          "type": "string"
+        },
+        "hover_s": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 120
+        },
+        "workcell_ready": {
+          "const": true
+        }
       }
     }
   ]

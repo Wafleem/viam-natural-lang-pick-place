@@ -742,7 +742,7 @@ async function poll() {
     chip('c-state', c.state ? (c.busy ? 'busy · ' + (c.action || c.state) : c.state) + (s.moving ? ' · moving' : '') : 'code-2 unreachable',
          c.busy ? 'busy' : (c.state === 'failed' || !c.state ? 'bad' : ''));
     chip('c-stage', 'stage ' + (c.stage || '—'));
-    chip('c-impl', (c.implementation || '?').replace('pickplace-v1-open-loop-suction-press', 'pickplace v1'));
+    chip('c-impl', (c.implementation || '?').replace(/^pickplace-v1-.*/, 'pickplace v1'));
     const clear = s.joints_deg.map((v, i) => Math.min(v - LIMITS[i][0], LIMITS[i][1] - v)), worst = Math.min(...clear);
     chip('c-limit', 'min joint clearance ' + worst.toFixed(1) + '°', worst < 1 ? 'bad' : worst < 5 ? 'warn' : '');
     const t = $('joints');

@@ -1,259 +1,156 @@
-# Deployment guide — armfarm19 pick-and-place (code-2)
+# Operating and deployment guide: armfarm19 pick-and-place (code-2)
 
-This module replaces code-2 version 0.0.24 on **armfarm19** (org *hackathons*, location *Arm Farm*).
-It keeps the same registry module and model, so the existing `code-2` service config keeps working:
+code-2 is a Viam generic service on **armfarm19** (org *hackathons*, location *Arm Farm*):
 
 - module `hackathons:armfarm19-vision-pickplace`
 - model `hackathons:armfarm19-vision-pickplace:generic-service`
 - machine `armfarm19`, part `armfarm19-main` (`f5c74a65-a023-4983-a317-1e9a88c88372`)
+- hardware: UFACTORY xArm6 (`viam:ufactory`), vacuum gripper `Vgripper`, wrist RealSense D435 `cam`
 
-## What changed from 0.0.24
+The last version demonstrated on hardware is **0.0.58**. The geometry behind every step is in
+[GEOMETRY.md](GEOMETRY.md).
 
-| Area | 0.0.24 | This module |
-|---|---|---|
-| Suction | Required 3 consecutive `IsHoldingSomething = true` readings; polled it during carry and aborted on false/RPC error | **Open loop.** `Grab` and dwell `suction_dwell_s`, `Open` and dwell `release_dwell_s`. The holding sensor is never read (a test enforces this) |
-| Pickup depth | Taught contact + up to three 1 mm retries | Descend to 20 mm above contact, suction on, **press 10 mm** (`press_depth_mm`) into the cube at `press_speed_deg_s` |
-| Wrist / J4 | Planner picked J4 = 360.000° (the URDF bound); the controller faulted with *Joint Angle Exceeds Limit* | IK picks free-space joint goals near the current pose; **every planned node keeps 5° from every joint limit** (`joint_limit_margin_deg`). J4 now stays near 0° |
-| Cube yaw | Fixed pickup branch | The square cube allows 90° steps; the step with the least joint travel is chosen for pickup and placement |
-| Targets | Ring + box survey flows, legacy sweep commands | One flow for both goals: vision at the calibrated overview → plan every stage → execute |
-| Ring | Required for every goal | Required for `ring`; optional obstacle for box goals |
-| Boxes | One hard-wired box | `boxes` list of named goals; `measure_box` drafts new entries from the camera |
-| Diagnostics | — | `self_test` checks kinematics, camera, lease and the reset path without moving |
+## 1. Setup on your computer
 
-Unchanged: vision targeting (5-frame RGB-D consensus, overview calibration, 15 mm grasp offset toward
-the image top), the accepted box pose/aperture/floor, collision-checked planning in the Viam builtin
-motion service, the code-1 arm lease, slow vertical moves.
-
-## 0. Physical state to fix first
-
-The last 0.0.24 run left the arm stopped at the failed lift. The latest read showed:
-
-- e-stop pressed in (`xArm: Emergency Stop Button Pushed In`)
-- J4 = **360.0008°**, just past its limit; TCP ≈ (377, 240, 195) mm, above the cube
-
-Steps, at the robot:
-
-1. Make sure nobody is in the workcell. Release the e-stop (it latches; this can't be done remotely).
-2. From here everything can be done remotely. In the dashboard's *xArm controller* panel, press
-   `clear_error`. That is the `viam:ufactory` driver's `{"clear_error": true}` arm DoCommand. xArm
-   Studio's *Clear Error* → *Enable* works too.
-3. Send `{"action":"recover_limits","workcell_ready":true}`. It clears the error again, switches
-   suction off and rolls **only J4** back to 355° at 2°/s. The tool can shift by ~15 mm. If any joint
-   is more than 6° past its limit, the command refuses; jog the arm by hand.
-4. Send `{"action":"reset","workcell_ready":true}`. The arm retreats straight up, then goes to the
-   calibrated overview.
-
-## 1. One-time setup on your computer
-
-From the repo root, `make setup`, then `make test`, `make dashboard`, `make plan-check GOAL=ring`,
-`make deploy VERSION=0.0.31` and `make select VERSION=0.0.31 APPLY=1` cover the steps below
-(`make help` lists them). Long form:
+From the repo root: `make setup`, `make test`, `make dashboard` (`make help` lists everything).
 
 ```bash
-cd ~/Documents/armfarm-pickplace/pickplace-module
+cd pickplace-module
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt -r requirements-dev.txt
-viam login        # browser OAuth; the tools read your CLI token, never a stored key
+viam login        # browser OAuth; the tools read your CLI token and never store a key
 ```
 
-If `viam` is not on your PATH, set `VIAM_CLI=/path/to/viam`. `VIAM_CLI_CONFIG` overrides the CLI
-config file (default `~/.viam/cached_cli_config.json`).
+If `viam` is not on your PATH, set `VIAM_CLI=/path/to/viam`.
 
 ## 2. Check without moving anything
 
-```bash
-.venv/bin/python -m pytest -q
-```
+| Command | What it checks |
+|---|---|
+| `.venv/bin/python -m pytest -q` | Kinematics, vision on saved frames, targets, planning, a full fake-robot cycle, retries and recovery, the API |
+| `.venv/bin/python tools/plan_check.py --goal box` | Every stage on the **live** motion planner (plan requests only, nothing moves) |
+| `.venv/bin/python tools/status.py` | Joints, TCP, joint-limit clearance, code-2 status |
 
-Offline: kinematics against the live frame system, IK limit margins, perception on saved
-overview frames, the 10 mm press target, box fit, a full fake-robot cycle (order, speeds, no
-holding-sensor reads), the guards on the service commands.
-
-```bash
-.venv/bin/python tools/plan_check.py --goal box
-```
+## 3. Deploy and roll back
 
 ```bash
-.venv/bin/python tools/plan_check.py --goal ring --ring-world-xy 440 130
+.venv/bin/python tools/deploy.py --version 0.0.59             # upload + cloud build (linux/amd64)
+.venv/bin/python tools/select_version.py --version 0.0.59          # preview
+.venv/bin/python tools/select_version.py --version 0.0.59 --apply  # switch code-2
+.venv/bin/python tools/select_version.py --version 0.0.58 --apply  # roll back
 ```
 
-These plan every stage on the **live** motion planner (real frame system and obstacles). The
-start state is the overview and the observation is a saved frame. Only `plan` requests are sent.
-`--ring-world-xy` moves the saved ring to a what-if position. `--live-detect` uses the camera
-instead; the arm must be parked at the overview.
-
-```bash
-.venv/bin/python tools/status.py
-```
-
-Read-only: joints, TCP, joint-limit clearance, code-2 status.
-
-## 3. Deploy
-
-```bash
-.venv/bin/python tools/deploy.py --version 0.0.25
-```
-
-This uploads the source and starts the cloud build (linux/amd64). Wait for **Done** at
-<https://app.viam.com/module/hackathons/armfarm19-vision-pickplace> (Builds).
-
-```bash
-.venv/bin/python tools/select_version.py --version 0.0.25
-```
-
-Preview: shows the current and new version and the changed sections.
-
-```bash
-.venv/bin/python tools/select_version.py --version 0.0.25 --apply
-```
-
-This changes only the code-2 module version. It refuses while the arm moves or code-1/code-2 are
-busy, and verifies the readback. The existing code-2 attributes are compatible: new keys take
-their defaults (10 mm press, 1 s dwells, 10/3/2 °/s, 5° margin).
-
-Optional: replace the attributes with the cleaned set in `config/code2-attributes.json` by adding
-`--attributes config/code2-attributes.json`. The previous module/service entry is saved to
-`tools/config-before-<version>.json`. If you replace attributes, roll back with that file, because
-0.0.24 needs its old attributes.
-
-Then confirm in the app (CONTROL → code-2 → DoCommand) that status reports
-`"implementation": "pickplace-v1-open-loop-suction-press"`.
-
-### Roll back
-
-```bash
-.venv/bin/python tools/select_version.py --version 0.0.24 --apply
-```
-
-Version-only rollback works when the attributes were not replaced.
+- `select_version` changes only the code-2 module version and service attributes. `--set
+  KEY=JSON` merges single attributes, and `--attributes file.json` replaces them all.
+- It refuses while the arm moves or code-1/code-2 are busy, and it verifies the readback.
+- The previous entry is saved locally to `tools/config-before-<version>.json` (gitignored).
+- **Selecting a version restarts code-2 for a few seconds.** A command sent during that window is
+  lost. The dashboard reports it as interrupted; just send it again.
 
 ## 4. Operating
 
-Viam app → armfarm19 → CONTROL → **code-2** → DoCommand. Commands that move the arm need
-`"workcell_ready": true`. Long commands return immediately; poll `status`.
+Use the dashboard ([../dashboard](../dashboard/)), or the Viam app → armfarm19 → CONTROL → **code-2** →
+DoCommand. Commands that move need `"workcell_ready": true`. Long commands return at once; poll
+`{"action":"status"}`.
 
 | Command | Moves? | What it does |
 |---|---|---|
-| `{"action":"status"}` | no | state, stage, error, goals, plan summary, last 30 events |
-| `{"action":"self_test"}` | no | from any pose: kinematics vs frame system, camera, lease, reset plan. No gripper calls |
-| `{"action":"dry_run","goal":"box"}` | no | at the overview: detect + plan every stage, report clearances |
-| `{"action":"measure_box","name":"box2"}` | no | at the overview: measure an orange Post-it box → candidate `boxes` entry |
-| `{"action":"box_once","workcell_ready":true}` | **yes** | one cube → first configured box (add `"goal":"box2"` for another) |
-| `{"action":"ring_once","workcell_ready":true}` | **yes** | one cube → ring cycle |
-| `{"action":"run","goal":"<ring or box name>","workcell_ready":true}` | **yes** | one cycle to any goal |
-| `{"action":"reset","workcell_ready":true}` | **yes** | suction off, straight retreat if low, go to the overview |
-| `{"action":"recover_limits","workcell_ready":true}` | **yes** | roll back a joint sitting at its hard limit |
-| `{"action":"release"}` | no | suction off |
-| `{"action":"stop"}` | stops | cancels the command and stops the arm (not an e-stop) |
+| `{"action":"pick_place","pick":{"object":"cube","select":"only"},"place":{"goal":"pink"}}` | **yes** | One cycle to a goal: `home`, `ring`, `box`, `pink`, or `{"type":"ring"}` / `{"color":"orange"}` |
+| `{"action":"reset_cube"}` | **yes** | Brings the cube home from wherever it is: a box, the shelf, the ring or the table |
+| `{"action":"hover_trial","goal":"pink","hover_s":30}` | **yes** | Holds the cube just outside a goal for a person to judge, then sets it back where it was picked |
+| `{"action":"recover_cube"}` | **yes** | After a failure: sets a still-gripped cube back on its pick spot and parks |
+| `{"action":"scan"}` | camera | Overview plus sweep; reports where the cube is |
+| `{"action":"reset"}` | **yes** | Suction off and park at the overview |
+| `{"action":"recover_limits"}` | **yes** | Rolls back a joint sitting at its hard limit |
+| `{"action":"set_cube_location","place":"home"}` | no | After moving the cube by hand: `unknown`, `table`, `home` or a goal |
+| `{"action":"dry_run","goal":"box"}` | no | Detect and plan every stage; reports clearances |
+| `{"action":"measure_box","name":"box2"}` | no | Measures a new orange Post-it box → candidate `boxes` entry |
+| `{"action":"status"}` · `describe` · `self_test` · `release` · `stop` | no | State and events · API and goals · checks without motion · suction off · cancel and stop the arm |
 
-A cycle: suction off → overview → detect → plan all stages → approach (10°/s) → descend to 20 mm
-above the cube (3°/s) → **suction on** → press to 10 mm below the taught contact (2°/s) → dwell 1 s
-→ lift (3°/s) → transfer (10°/s) → place (3°/s) → **suction off**, dwell 1 s → retract → overview.
+### One cycle
 
-On any failure the arm stops and **suction is left as it was**, so a carried cube is not dropped.
-Check the workcell, then use `release` and/or `reset`.
+1. **Look.** Go to the overview and find the cube by vision, sweeping if needed. When code-2
+   remembers the cube in a receptacle, it takes one overview look only, then uses the remembered
+   placement.
+2. **Plan.** Plan every stage. Independent chains are planned concurrently, and internal
+   motion-service crashes are retried.
+3. **Pick.** Approach, descend, suction on, press `press_depth_mm` into the cube at 1°/s.
+4. **Seal.** Wait for the holding sensor to report a seal, up to `suction_dwell_s`, then
+   `seal_settle_s`.
+5. **Lift.** Check the holding sensor again. If there's no seal or a drop, re-pick, up to
+   `pick_retries`.
+6. **Carry.** Carry and place. Table goals keep the cube upright; the shelf turns it level and
+   slides it in.
+7. **Release.** Suction off, retract, park at the overview.
+8. **Check.** Verify by camera that the pick spot is empty.
 
-Keep the physical e-stop in reach. The software `stop` is not an e-stop.
+A failure with the cube still held triggers automatic recovery: the cube is set back on its pick
+spot and the arm parks. **STOP** stops in place. Keep the physical e-stop in reach; the software
+stop is not an e-stop.
 
-### Layout: one cube, three places
+### Places (config)
 
-All positions are tool XY in mm. +x points from the arm toward the front wall.
+All coordinates are in the arm's world frame, in mm; +x points from the arm toward the wall.
 
-| Place | Where | How code-2 knows |
+| Key | What it describes |
+|---|---|
+| `home` | The cube's table spot `{"xy_mm", "yaw_deg"}` |
+| `ring` | Fixed ring spot `{"xy_mm", "diameter_mm", "height_mm"}` |
+| `boxes` | Top-entry boxes: floor centre, inner size, yaw, rim, optional `placement_center_xy_mm`, `color`, `label` (the orange box is `"box on the table"`) |
+| `side_boxes` | Side-entry boxes (the pink wall shelf): `back_x_mm`, `floor_z_mm`, `center_y_mm`, `opening_y_mm`, `top_z_mm`, `front_x_mm`, `panels` (frame names), `back_clearance_mm`, `release_above_floor_mm`, `entry_margin_mm`, `roll_deg` |
+| `workcell_obstacles` | Frame-system obstacles the carried cube must clear: `[{"frame", "dims_mm"}]`. Poses are read live every cycle |
+| `camera_correction` | Replacement camera → calibrated camera: `depth_scale` and a 4×4 `matrix` |
+
+**Teaching a placement.** Run `hover_trial` and have someone say which way and how far the cube is
+off. Adjust the entry (for example the box's floor centre, or the shelf's `center_y_mm`, `roll_deg`
+or `release_above_floor_mm`) with `select_version --set`, and hover again before the first real
+placement.
+
+**Adding a top-entry box.** Make the box visible from the overview, with two orange Post-its, then
+`reset` and `measure_box`. Check the candidate, add it to `boxes`, then `dry_run` → `hover_trial` →
+`pick_place`.
+
+**Adding a side-entry box.** Model its panels in the machine config, and add each to
+`workcell_obstacles`. Point the camera into the opening and measure the floor, back and sides from
+depth (as in GEOMETRY.md), then add a `side_boxes` entry and hover-test.
+
+### Tuning
+
+| Key | Demo value | Range |
 |---|---|---|
-| `home` | (363.8, 240.3), yaw 1.4°: where the cube sat in the last run | config `home`; the cube is found by vision here, at any yaw |
-| `box` | floor centre (298.2, −143.1), yaw −4.93° | config `box` (measured). **Don't move it**: the narrow-side gap is 1.4 mm |
-| `ring` | (300, −470): directly beyond the box, about 8 cm past its far wall | config `ring` (fixed spot, outside the camera view). The cube on a 230 mm ring tolerates a few cm of error |
-
-Commands: `pick_place` to `home`/`ring`/`box`, `reset_cube` (back home from wherever code-2
-put it), `set_cube_location` (after moving the cube by hand). The dashboard's big buttons run
-whole flows: PRE-FLIGHT, RECOVER & HOME, CUBE → BOX / RING / HOME, FULL TOUR.
-
-### Workcell rules
-
-- **Boxes**: each must stay where it was accepted. The current `box` has floor centre
-  (298.2, −143.1, 0.85) mm, yaw −4.93°, opening 261.4 × 206.6 mm and rim z 130.0 mm. If someone moves a
-  box, re-measure it and update its entry. Every configured box is a collision obstacle for every goal.
-- **Ring**: the cube resting on the ring must not reach the box or `wall-front` (x ≈ 600 mm).
-  Verified on the live planner: ring at tool XY (440, 130) plans; (530, 67), where it sat at 23:02 on
-  Oct 16, does not (cube would hit `wall-front`), and (440, 60–90) does not (box wall).
-- **Cube and ring** must be fully visible from the overview. The ring is optional for the box goal.
-
-### Tuning (code-2 attributes)
-
-| Key | Default | Range |
-|---|---|---|
-| `press_depth_mm` | 10 | 0–20 |
-| `pre_contact_mm` | 20 | 5–100 |
-| `suction_dwell_s` / `release_dwell_s` | 1.0 | 0–10 |
-| `travel_speed_deg_s` / `approach_speed_deg_s` / `press_speed_deg_s` | 10 / 3 / 2 | 0.5–20 / 0.5–10 / 0.2–5 |
+| `press_depth_mm` / `press_speed_deg_s` | 20 / 1 | 0–20 / 0.2–5 |
+| `suction_dwell_s` (longest wait for the seal) / `seal_settle_s` | 3.0 / 0.5 | 0–10 / 0–5 |
+| `pick_retries` | 3 | 0–5 |
+| `travel_speed_deg_s` / `approach_speed_deg_s` / `sweep_speed_deg_s` | 75 / 37.5 / 75 | ≤100 / ≤50 / ≤100 |
+| `acceleration_deg_s2` | 94 | 1–200 |
+| `clearance_mm` (hover above a table, ring or home contact) | 50 | 30–300 |
+| `carry_clearance_mm` / `carry_upright_deg` | 50 / 15 | the planner keeps this from walls and ceiling / max tilt while carrying to table goals |
 | `joint_limit_margin_deg` | 5 | 1–30 |
-| `clearance_mm` | 100 | 30–300: approach height above the cube / ring contact |
-| `box_entry_clearance_mm` | 30 | 10–200: carried cube bottom above a box rim before entering |
-| `release_above_goal_mm` | 0 | 0–50: release this far above the seated height |
-| `default_goal` | from config | `ring` or a box name |
-| `lease_service` | `code-1` | `""` disables the lease |
 
-### Adding another box
-
-The math (frames, grasp transform, yaw choice, fit check) is in [GEOMETRY.md](GEOMETRY.md). The
-dashboard's Vision and Config tabs do every step below without editing JSON.
-
-Goals are `ring` plus one goal per entry in the `boxes` list. The older single `box` /
-`surveyed_box.box` attributes are still read as one box named `box`.
-
-```json
-"boxes": [
-  {"name": "box",  "floor_center_world_mm": [298.2, -143.1, 0.85], "placement_center_xy_mm": [298.4, -141.3],
-   "inner_dimensions_mm": [261.4, 206.6], "world_yaw_deg": -4.93, "rim_z_mm": 130.0},
-  {"name": "box2", "...": "from measure_box"}
-]
-```
-
-1. Put the new box where the overview camera sees all four walls and its inside floor, with two
-   orange Post-its on it. Run `reset`, then `{"action":"measure_box","name":"box2"}`.
-2. `status.last_result.candidate` is a ready-made entry: three frames that agree, the tightest
-   opening seen, and heights matched to the taught tabletop.
-3. Check the opening with a tape measure. Add the entry to `boxes`, then run
-   `{"action":"dry_run","goal":"box2"}` before the first `run`.
-
-The cube needs a few mm of clearance per side (it is placed with no padding). The carry height
-clears the tallest configured rim.
-
-After `return`, the cycle checks the pick spot with the camera, since there's no usable suction
-feedback. `last_result.outcome.cube_left_pick_spot` is `false` when the cube is still there.
-
-The xArm's collision sensitivity is 3. If the controller reports a collision during `press`, lower the
-sensitivity in xArm Studio, or reduce `press_depth_mm`/`press_speed_deg_s`.
+The arm driver's own cap is `speed_degs_per_sec` in the machine config (75 at the demo). The xArm's
+collision sensitivity was 0 for the 20 mm press; the planner and the closed-loop suction carry the
+safety load.
 
 ## 5. What has and has not been verified
 
-Verified without motion (night of Oct 16–17, 2026):
-- 48 offline tests pass (pickplace-module), plus 11 parser tests (nl-integration).
-- FK from the live URDF matches the live frame system to 1e-6 mm.
-- Live motion planner: every stage of a cube → box cycle plans from the overview. The wrist stays
-  on the taught branch (J4 180–191.5°) like the operator-taught cycle; 0.0.24 drove J4 to 360°.
-- Live motion planner: cube → ring plans with the ring at (440, 130).
-- Deployed on armfarm19, now **0.0.30** (cloud build Done): `status`, `describe` and `self_test`
-  run on the robot. self_test passes kinematics, camera (intrinsics match calibration) and lease.
-  The reset plan is correctly blocked until `recover_limits`, because J4 sits at 360.0008°.
+**On hardware, Oct 17, 2026, by the end of the event, with 0.0.54–0.0.58:**
+- cube → table box, box → home, cube → ring, ring → home, cube → wall shelf (sideways),
+  shelf → home, and full tours;
+- each driven by buttons and by natural-language commands from the dashboard;
+- closed-loop seal and lift checks;
+- a mid-air failure recovered by setting the cube back down;
+- the replacement camera after its correction was fitted.
 
-- Teammate web app (branch `integrate-web-ui`, `code3-web/`): moved to `pick_place`. 51/51 tests on
-  Node 22. Fed the robot's live status it unlocks Send for ring, box and orange-box tasks and blocks
-  a blue box. The robot parses its exact `pick`/`place` arguments (checked with `dry_run`).
+**Offline only (after the hardware was no longer available):**
+- the planner-crash retry moved into `Planner.segment`, so it covers every plan call, with a test
+  that injects the crash;
+- the JSON command schema, with a test that keeps it in sync with the service;
+- wording and documentation updates.
 
-Not verified:
-- Any physical execution of this module (the e-stop has been latched the whole time).
-- Whether a 10 mm press with open-loop suction holds the cube through transfer.
-- Whether the controller tolerates the press at collision sensitivity 3.
-- The camera/overview calibration and the accepted box pose. These are unchanged from 0.0.24 and
-  only as good as before.
-
-Worth checking with someone on site:
-- **Vacuum feedback wiring.** `Vgripper` has no `connection_type`, so the driver assumes
-  `contact` wiring on this arm (hardware ≥1305). If the cup is the older plug-in type, the holding
-  signal is read from the wrong inputs. With a cube sealed, compare the dashboard's
-  *contact* / *plugin* vacuum readings. code-2 does not depend on this either way.
-- **Front wall obstacle.** A fragment override moves `wall-front` from 740 to 650 mm. It's what
-  rules out ring positions near x ≈ 530. If the real wall is farther out, that override is too
-  conservative.
+**Known limits:**
+- Inside receptacles, the cube's pose comes from code-2's memory of where it put the cube, not from
+  a fresh camera measurement. If someone takes it out by hand, run `set_cube_location`.
+- Sweep views at the far right sometimes read the cube 12–13 mm high and fall through to the next
+  view. That costs a few seconds, not correctness.
+- Carries at 2.5× speed rely on the seal; the holding sensor is checked after the lift, not during
+  the carry.

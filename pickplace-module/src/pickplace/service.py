@@ -42,7 +42,7 @@ from .config import Settings
 from .cycle import PickPlaceCycle
 from .vision_geometry import CUBE_SELECTORS
 
-IMPLEMENTATION = 'pickplace-v1-open-loop-suction-press'
+IMPLEMENTATION = 'pickplace-v1-closed-loop-suction'
 LOGGER = getLogger(__name__)
 API_VERSION = 1
 CYCLE_ACTIONS = {'pick_place', 'run', 'box_once', 'ring_once', 'start'}  # start: pre-0.0.25 clients
@@ -88,7 +88,7 @@ class PickPlaceService(Generic, EasyResource):
             'error': self.error, 'request_id': self.request_id, 'default_goal': s.default_goal,
             'goals': s.goals, 'action': getattr(self, 'action', ''),
             'cube_location': copy.deepcopy(c.memory.location), 'home': copy.deepcopy(s.home),
-            # Fields the code-3 web app (code3-web) checks before allowing a send.
+            # Readiness fields for web clients: what can be targeted, and whether calibration is loaded.
             'available_goals': s.goals, 'calibrated': bool(s.calibration),
             'goal_details': ([{'name': 'home', 'type': 'table'}] if s.home else [])+[{'name': 'ring', 'type': 'ring'}]+[
                 {'name': n, 'type': 'box', 'color': b.get('color')} for n, b in s.boxes.items()]+[
