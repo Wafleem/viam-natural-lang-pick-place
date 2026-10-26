@@ -134,11 +134,3 @@ Or straight from the Viam app (CONTROL → code-2 → DoCommand):
 ```json
 {"action": "pick_place", "pick": {"object": "cube", "select": "only"}, "place": {"goal": "pink"}, "workcell_ready": true}
 ```
-
-## Status
-
-We demonstrated on the armfarm19 workcell with module **0.0.58**, the last build that ran on
-hardware. Every route worked there, each to and from home: the table box, the ring and the wall
-shelf, plus natural-language commands. The hardware is no longer available to us. Later commits
-are offline-tested only: a single planner-crash retry, schema and documentation updates. See
-[what was verified](pickplace-module/DEPLOYMENT.md#5-what-has-and-has-not-been-verified).
